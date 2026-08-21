@@ -1,0 +1,2 @@
+# 設計書 付録 A-3: Linux cron（/etc/cron.d/ksql — JST サーバーの場合）
+0 6 * * * batch cd /opt/ksql-project && ksql-flow run-all ./jobs/ --profile prod >> /var/log/ksql/cron.log 2>&1

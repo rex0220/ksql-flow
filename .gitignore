@@ -1,0 +1,19 @@
+# dependencies / build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# ランナーの実行時生成物（ロック・state・ローカル JSONL ログ）
+.ksql/
+
+# ローカル運用ファイル（トークン等の env: 参照を含むため念のため除外。例は examples/ を参照）
+ksql.config.json
+.env
+.env.*
+
+# test / coverage
+coverage/
+
+# OS / editor
+.DS_Store
+Thumbs.db

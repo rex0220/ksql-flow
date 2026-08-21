@@ -1,0 +1,21 @@
+# 設計書 付録 A-1: GitHub Actions（毎朝 6:00 JST）
+name: daily-batch
+on:
+  schedule:
+    - cron: '0 21 * * *'   # 21:00 UTC = 翌 6:00 JST
+  workflow_dispatch:        # 手動リラン用
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm i -g @rex0220/ksql-flow
+      - run: ksql-flow run-all ./jobs/ --profile prod
+        env:
+          KSQL_TOKEN_ORDERS: ${{ secrets.KSQL_TOKEN_ORDERS }}
+          KSQL_TOKEN_CUST_READ: ${{ secrets.KSQL_TOKEN_CUST_READ }}
+          KSQL_TOKEN_CUST_WRITE: ${{ secrets.KSQL_TOKEN_CUST_WRITE }}
+          KSQL_TOKEN_LOGS: ${{ secrets.KSQL_TOKEN_LOGS }}
+          SLACK_ALERT_WEBHOOK_URL: ${{ secrets.SLACK_ALERT_WEBHOOK_URL }}

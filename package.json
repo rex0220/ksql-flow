@@ -1,0 +1,42 @@
+{
+  "name": "@rex0220/ksql-flow",
+  "version": "0.1.0",
+  "description": "kSQL Flow — batch runner CLI for kintone-sql-tools Flow dialect 1 (orchestration, locking, rerun, log app, retry, notification)",
+  "license": "MIT",
+  "author": "rex0220",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "ksql-flow": "dist/cli.js"
+  },
+  "main": "dist/cli.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "jest --runInBand",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@rex0220/kintone-sql-tools": "file:../kintone-sql-tools"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^18.19.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.2",
+    "typescript": "^5.4.0"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/__tests__/**/*.test.ts"
+    ]
+  }
+}
