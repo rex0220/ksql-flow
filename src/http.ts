@@ -1,4 +1,4 @@
-import { ApiLimitError, HttpRetryExhaustedError } from "./errors";
+import { ApiLimitError, DryRunMutationError, HttpRetryExhaustedError } from "./errors";
 import { ResolvedProfile, RetryConfig } from "./config";
 
 /** リトライ対象の HTTP ステータス（設計書 7.1: API 一時エラー） */
@@ -18,6 +18,8 @@ export interface HttpLayerOptions {
   sleep?: (ms: number) => Promise<void>;
   /** テスト用の下位 fetch 差し替え（モック kintone） */
   baseFetch?: typeof fetch;
+  /** dry-run: kintone の変更系 HTTP を下位 fetch 到達前に遮断する */
+  dryRun?: boolean;
 }
 
 export interface HttpLayer {
@@ -42,6 +44,10 @@ export function createHttpLayer(options: HttpLayerOptions): HttpLayer {
 
   const wrapped = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+    if (options.dryRun === true && isMutationRequest(url, method)) {
+      throw new DryRunMutationError(method, safePath(url));
+    }
     const headers = new Headers(init?.headers);
     if (options.basicAuth) {
       const encoded = Buffer.from(`${options.basicAuth.username}:${options.basicAuth.password}`).toString("base64");
@@ -108,6 +114,27 @@ export function createHttpLayer(options: HttpLayerOptions): HttpLayer {
     },
     snapshot: () => count,
   };
+}
+
+/**
+ * dry-run で許可する非 GET は、record read 用 cursor の作成・破棄だけ。
+ * それ以外の kintone API POST/PUT/DELETE は、records.json 以外の将来経路も含め fail-closed にする。
+ */
+function isMutationRequest(url: string, method: string): boolean {
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
+  const path = safePath(url);
+  if (/\/k\/(?:guest\/\d+\/)?v1\/records\/cursor\.json$/i.test(path)) {
+    return method !== "POST" && method !== "DELETE";
+  }
+  return /\/k\/(?:guest\/\d+\/)?v1\//i.test(path);
+}
+
+function safePath(url: string): string {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return url.split("?")[0];
+  }
 }
 
 function retryDelayMs(retry: RetryConfig, attempt: number, retryAfter: string | null): number {

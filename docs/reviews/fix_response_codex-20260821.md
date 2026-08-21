@@ -150,3 +150,39 @@
 - 修正方法: `maskLastKeyValue` で `UPSERT` に加えて `UPSERT_SELECT` もキー列の `logging.maskFields` 照合対象とし、両 AST タイプの `keyFields` を同じ伏字化経路へ通すようにした。
 - 変更ファイル: `src/executor.ts`, `test/__tests__/run.test.ts`, `docs/reviews/fix_response_codex-20260821.md`
 - 追加テスト: `UPSERT SELECT の lastKeyValue も logging.maskFields で伏字化する`
+
+## fix4（v3.71.0 / dry-run 本実装）
+
+### 実装内容
+
+- `src/commands/dryrun.ts` を EXPLAIN 縮退版から差分プレビュー実装へ置換した。単一 `ExecutionContext` で read-only 文は `executeStatement`、DML は `previewStatement` に振り分け、TEMP TABLE・変数・as-of / timezone を共有する。
+- ASSERT 違反は「ABORTED になる」表示 + Exit 2、EXIT SUCCESS IF 成立は直前の `executeStatement` の `EXIT_NO_DATA` で判定して「NO_DATA になる」表示 + Exit 0 とし、残りの文を打ち切る。
+- INSERT / UPDATE / DELETE の予定件数、read-only / preview の実測 API 消費、before / after、DELETE キーサンプルを人間向け表示と JSON に写像した。`--sample` は 1〜50（既定 5）、`--json` は run で `DRY_RUN`、run-all で `DRY_RUN_BATCH` の単一オブジェクトを出力する。
+- `logging.maskFields` は該当値を `***`、`logging.stripLiterals` 有効時はその他のサンプル値を `?` とし、コンソール・JSON・ローカル JSONL を同じマスク済み構造から生成する。
+- HTTP 層へ dry-run ガードを追加した。record read 用 cursor の POST / DELETE だけを許可し、それ以外の kintone 変更系 POST / PUT / DELETE は下位 fetch 前に `DryRunMutationError` とする。dry-run 経路はロック、ログアプリ、state を通らず、ローカル JSONL とコンソールだけを更新する。
+- `limits.maxApiCalls` / `--max-api-calls` は prepare、read-only、preview の共有 HTTP カウンタへ適用し、超過時は Exit 3 で安全停止して確定済みプレビューを保持する。
+- `run-all --dry-run` は既存の依存検証済みファイル順で連続実行し、ロックを取得しない。人間向け表示の先頭および JSON の `warning` に「ジョブ間のデータ依存は再現されない」旨を載せる。
+
+### 依存・テスト
+
+- `package.json` のエンジン依存をレジストリ版 `^3.71.0` へ更新した。`package-lock.json` も v3.71.0 の npm tarball を固定し、ローカル開発時だけ `npm run dev:engine-local` で `file:../kintone-sql-tools` を一時適用する。
+- テスト件数: **93 → 100**（受け入れ基準 1〜7 と HTTP ガードを追加し、旧 EXPLAIN 縮退テストを差し替えた結果、純増 7 件）。`npm test`: 9 suites / 100 tests 成功。`npm run build`: 成功。
+- 実証内容: §3.1 サンプルの差分、mutation request 0、prepare 検証、ABORTED / Exit 2、NO_DATA / Exit 0、maskFields / stripLiterals、sample / JSON、maxApiCalls の部分表示、run-all の依存順・注意文・ロックなしを実エンジン v3.71.0 + mock kintone 結合テストで確認した。
+
+### R2・裁定
+
+- **R2 仕様との差異: なし。** counts 3 キー固定、サンプル既定 5 / 上限 50、DELETE キーのみ、reads / estimatedWrites、context 共有、書込 0 の6件をそのまま利用した。
+- R2 外の v3.71.0 確定事項「EXIT 成立後の preview は全ゼロ」は認識済み。ランナーは契約どおり直前の `executeStatement` 結果で EXIT 成立を判定し、その場で打ち切るため後続 DML を呼び出さない。
+- **新規裁定: なし。** run-all は指示書の明示案（依存順で継続し、非再現制約を冒頭表示）で判断が割れなかったため `docs/reviews/decisions.md` は変更していない。
+
+### 設計書 v2.8・文書
+
+- `docs/ksql_flow_design_v2_8.md` を新規作成し、§10.2 を実測差分プレビュー、HTTP 副作用ゼロ、ゲート Exit、マスキング、sample / JSON、maxApiCalls、run-all 制約で確定した。縮退版 / E-2 待ち注記は残していない。
+- §12 に dry-run HTTP 多重防壁、§14 に `validate-all` + `run-all --dry-run --json` の CI 例、付録 C に v2.7 → v2.8 fix4 を追加した。
+- `CLAUDE.md` / `AGENTS.md` の仕様の正を v2.8、エンジン申し送りを v3.71.0 へ更新した。README は dry-run 節、CI 例、互換表 v3.71.0、ローカルエンジン結合手順を更新した。
+
+### エンジン宛て申し送り
+
+- 本リポジトリ: `docs/kSQL Flowからの申し送り-fix4-dryrun完了-20260822.md`
+- エンジンリポジトリ: `C:/Users/rex02/Projects/kintone-sql-tools/docs/flow_fix4_dryrun_completion_20260822.md`
+- ① fix4 完了、② Q3 縮退解除済み、③ metrics 判定 (a) / Q7 の2件が fix3 でクローズ済みであることを1通にまとめた。エンジン側への追加はこの新規文書1ファイルだけで、コード・既存文書は変更していない。

@@ -12,6 +12,8 @@ export interface RunOptions {
   asOf?: string;
   dryRun?: boolean;
   strict?: boolean;
+  sample?: number;
+  json?: boolean;
   maxApiCalls?: number;
   lockLocalOnly?: boolean;
   forceUnlock?: boolean;
@@ -32,6 +34,8 @@ export async function runCommand(
     lockLocalOnly: options.lockLocalOnly,
     baseFetch: options.baseFetch,
     out: options.out,
+    dryRun: options.dryRun,
+    json: options.json,
   });
   const out = env.out;
 
@@ -46,7 +50,7 @@ export async function runCommand(
   }
 
   if (options.dryRun === true) {
-    return dryRunJob(env, job, asOf, { strict: options.strict });
+    return dryRunJob(env, job, asOf, { sample: options.sample, json: options.json, strict: options.strict });
   }
 
   if (env.logApp === null) {

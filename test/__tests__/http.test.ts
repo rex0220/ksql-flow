@@ -7,6 +7,34 @@ function jsonResponse(status: number, headers?: Record<string, string>): Respons
 }
 
 describe("HTTP 層（設計書 7 章）", () => {
+  test("dry-run ガードは変更系 API を下位 fetch 前に遮断し cursor 読取は許可する", async () => {
+    let calls = 0;
+    const layer = createHttpLayer({
+      retry: { ...DEFAULT_RETRY, maxAttempts: 1 },
+      maxApiCalls: null,
+      attemptTimeoutMs: 1000,
+      dryRun: true,
+      baseFetch: (async () => {
+        calls += 1;
+        return jsonResponse(200);
+      }) as typeof fetch,
+    });
+    for (const method of ["POST", "PUT", "DELETE"]) {
+      await expect(
+        layer.fetch("https://example.cybozu.com/k/v1/records.json", { method })
+      ).rejects.toThrow("副作用ゼロガード");
+    }
+    await expect(
+      layer.fetch("https://example.cybozu.com/k/guest/123/v1/records.json", { method: "POST" })
+    ).rejects.toThrow("副作用ゼロガード");
+    expect(calls).toBe(0);
+    expect(layer.count).toBe(0);
+
+    await layer.fetch("https://example.cybozu.com/k/v1/records/cursor.json", { method: "POST" });
+    await layer.fetch("https://example.cybozu.com/k/v1/records/cursor.json", { method: "DELETE" });
+    expect(calls).toBe(2);
+  });
+
   test("429 は Retry-After を尊重してリトライする", async () => {
     const delays: number[] = [];
     let calls = 0;

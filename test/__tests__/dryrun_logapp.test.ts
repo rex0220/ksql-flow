@@ -1,4 +1,7 @@
+import * as fs from "fs";
 import { runCommand } from "../../src/commands/run";
+import { runAllCommand } from "../../src/commands/runAll";
+import { parseArgs } from "../../src/cli";
 import { checkLogAppCommand, initLogAppCommand } from "../../src/commands/initLogapp";
 import { EXIT } from "../../src/types";
 import { AS_OF, buildWorld, customerRecords, LOG_APP, SAMPLE_JOB, TestWorld, writeJob } from "../helpers/world";
@@ -13,8 +16,15 @@ afterEach(() => {
 
 const ORDERS = [{ 顧客コード: "C1", 金額: "100", 受注日: "2026-08-05", ステータス: "受注完了" }];
 
-describe("--dry-run（縮退版: フル検証 + 推定 API 消費。タスク指示書 §4-4）", () => {
-  test("検証 OK のジョブ: EXPLAIN 推定を表示し、書き込みは行わない", async () => {
+function mutationRequests(world: TestWorld) {
+  return world.mock.requests.filter((request) => {
+    if (request.method === "GET") return false;
+    return !request.path.endsWith("/records/cursor.json");
+  });
+}
+
+describe("--dry-run（fix4: v3.71.0 差分プレビュー）", () => {
+  test("§3.1 サンプルを実測プレビューし、kintone mutation 0・ローカル JSONL のみ", async () => {
     world = buildWorld({ orders: ORDERS });
     const file = writeJob(world, "01_monthly.sql", SAMPLE_JOB);
     const code = await runCommand(world.profile, file, {
@@ -26,13 +36,20 @@ describe("--dry-run（縮退版: フル検証 + 推定 API 消費。タスク指
     expect(code).toBe(EXIT.OK);
     const text = world.output.join("\n");
     expect(text).toContain("[DRY-RUN]");
-    expect(text).toContain("estimated API consumption");
-    // 書き込みは発生しない
+    expect(text).toContain("読み取り");
+    expect(text).toContain("書き込み予定");
+    expect(text).toContain("INSERT 1 件 / UPDATE 0 件 / DELETE 0 件");
+    expect(text).toContain("実測 API 消費");
+    expect(text).toContain("変更サンプル");
     expect(customerRecords(world)).toHaveLength(0);
-    expect(world.mock.requests.every((request) => request.method === "GET" || !request.path.endsWith("/records.json"))).toBe(true);
+    expect(mutationRequests(world)).toHaveLength(0);
+    expect(fs.existsSync(`${world.dir}/.ksql/state.json`)).toBe(false);
+    const jsonl = fs.readdirSync(world.profile.logging.localDir).filter((name) => name.endsWith(".jsonl"));
+    expect(jsonl).toHaveLength(1);
+    expect(fs.readFileSync(`${world.profile.logging.localDir}/${jsonl[0]}`, "utf8")).toContain("dry_run_finish");
   });
 
-  test("検証エラーのジョブ: Exit 1 で EXPLAIN まで進まない", async () => {
+  test("dialect 1 prepare 検証エラーは preview 前に Exit 1", async () => {
     world = buildWorld({ customerUnique: false });
     const file = writeJob(world, "01_monthly.sql", SAMPLE_JOB);
     const code = await runCommand(world.profile, file, {
@@ -43,16 +60,50 @@ describe("--dry-run（縮退版: フル検証 + 推定 API 消費。タスク指
     });
     expect(code).toBe(EXIT.VALIDATION);
     expect(world.output.join("\n")).toContain("KSQL1303");
+    expect(mutationRequests(world)).toHaveLength(0);
   });
 
-  test("@関数に見える文字列リテラルを置換せず asOf / timezone 付きで EXPLAIN する", async () => {
-    world = buildWorld({ orders: ORDERS });
+  test("ASSERT 違反は ABORTED になる表示 + Exit 2", async () => {
+    world = buildWorld({ orders: [{ ...ORDERS[0], 金額: "-1" }] });
+    const file = writeJob(world, "01_aborted.sql", SAMPLE_JOB);
+    const code = await runCommand(world.profile, file, {
+      asOf: AS_OF,
+      dryRun: true,
+      baseFetch: world.mock.fetch,
+      out: world.out,
+    });
+    expect(code).toBe(EXIT.ABORTED);
+    expect(world.output.join("\n")).toContain("ABORTED になる");
+    expect(mutationRequests(world)).toHaveLength(0);
+  });
+
+  test("EXIT SUCCESS IF 成立は NO_DATA 表示 + Exit 0、後続 DML は実行しない", async () => {
+    world = buildWorld({ orders: [] });
+    const file = writeJob(world, "01_no_data.sql", SAMPLE_JOB);
+    const code = await runCommand(world.profile, file, {
+      asOf: AS_OF,
+      dryRun: true,
+      baseFetch: world.mock.fetch,
+      out: world.out,
+    });
+    expect(code).toBe(EXIT.OK);
+    const text = world.output.join("\n");
+    expect(text).toContain("NO_DATA になる");
+    expect(text).toContain("INSERT 0 件 / UPDATE 0 件 / DELETE 0 件");
+    expect(mutationRequests(world)).toHaveLength(0);
+  });
+
+  test("maskFields と stripLiterals の趣旨を before/after・キーへ適用", async () => {
+    world = buildWorld({
+      orders: ORDERS,
+      customers: [{ 顧客コード: "C1", 当月受注件数: "9", 当月売上実績: "50" }],
+    });
+    world.profile.logging.maskFields = ["当月売上実績"];
+    world.profile.logging.stripLiterals = true;
     const file = writeJob(
       world,
-      "01_literal.sql",
-      `-- @ksql dialect: 1
-SELECT '@NOW()' AS marker, @TODAY() AS run_date FROM LAPP_受注;
-`
+      "01_mask.sql",
+      `${SAMPLE_JOB}\nDELETE FROM LAPP_顧客マスタ WHERE 顧客コード = 'C1';\n`
     );
     const code = await runCommand(world.profile, file, {
       asOf: AS_OF,
@@ -61,7 +112,112 @@ SELECT '@NOW()' AS marker, @TODAY() AS run_date FROM LAPP_受注;
       out: world.out,
     });
     expect(code).toBe(EXIT.OK);
-    expect(world.output.join("\n")).toContain("[#1] SELECT");
+    const text = world.output.join("\n");
+    expect(text).toContain("当月売上実績: *** → ***");
+    expect(text).toContain("顧客コード=?");
+    expect(text).not.toContain("当月売上実績: 50");
+    expect(text).toContain("(削除予定)");
+    expect(mutationRequests(world)).toHaveLength(0);
+  });
+
+  test("--sample N と --json: 上限件数の機械可読オブジェクトを返す", async () => {
+    const parsed = parseArgs(["run", "-f", "job.sql", "--dry-run", "--sample", "2", "--json"]);
+    expect(parsed.flags.get("--sample")).toBe("2");
+    expect(parsed.flags.get("--json")).toBe(true);
+    world = buildWorld({
+      orders: Array.from({ length: 4 }, (_, index) => ({
+        顧客コード: `C${index + 1}`,
+        金額: String(100 + index),
+        受注日: "2026-08-05",
+        ステータス: "受注完了",
+      })),
+    });
+    const file = writeJob(world, "01_json.sql", SAMPLE_JOB);
+    const code = await runCommand(world.profile, file, {
+      asOf: AS_OF,
+      dryRun: true,
+      sample: 2,
+      json: true,
+      baseFetch: world.mock.fetch,
+      out: world.out,
+    });
+    expect(code).toBe(EXIT.OK);
+    expect(world.output).toHaveLength(1);
+    const report = JSON.parse(world.output[0]) as { kind: string; sampleLimit: number; samples: unknown[] };
+    expect(report.kind).toBe("DRY_RUN");
+    expect(report.sampleLimit).toBe(2);
+    expect(report.samples).toHaveLength(2);
+  });
+
+  test("不正な --sample は読取開始前に Exit 1", async () => {
+    world = buildWorld({ orders: ORDERS });
+    const file = writeJob(world, "01_bad_sample.sql", SAMPLE_JOB);
+    const code = await runCommand(world.profile, file, {
+      asOf: AS_OF,
+      dryRun: true,
+      sample: 51,
+      baseFetch: world.mock.fetch,
+      out: world.out,
+    });
+    expect(code).toBe(EXIT.VALIDATION);
+    expect(world.mock.requests).toHaveLength(0);
+    expect(world.output.join("\n")).toContain("1〜50");
+  });
+
+  test("maxApiCalls 超過は既取得 preview を残して安全停止する", async () => {
+    world = buildWorld({ customers: [{ 顧客コード: "C1", 当月売上実績: "50" }] });
+    const file = writeJob(
+      world,
+      "01_limit.sql",
+      `-- @ksql dialect: 1
+INSERT INTO LAPP_顧客マスタ (顧客コード, 当月売上実績) VALUES ('NEW', 1);
+UPDATE LAPP_顧客マスタ SET 当月売上実績 = 99 WHERE 顧客コード = 'C1';
+UPDATE LAPP_顧客マスタ SET 当月売上実績 = 98 WHERE 顧客コード = 'C1';
+UPDATE LAPP_顧客マスタ SET 当月売上実績 = 97 WHERE 顧客コード = 'C1';
+UPDATE LAPP_顧客マスタ SET 当月売上実績 = 96 WHERE 顧客コード = 'C1';
+UPDATE LAPP_顧客マスタ SET 当月売上実績 = 95 WHERE 顧客コード = 'C1';
+`
+    );
+    const code = await runCommand(world.profile, file, {
+      dryRun: true,
+      maxApiCalls: 4,
+      baseFetch: world.mock.fetch,
+      out: world.out,
+    });
+    expect(code).toBe(EXIT.RUNTIME);
+    const text = world.output.join("\n");
+    expect(text).toContain("INSERT 1 件");
+    expect(text).toContain("maxApiCalls=4");
+    expect(mutationRequests(world)).toHaveLength(0);
+  });
+
+  test("run-all --dry-run は依存順・ロックなしで注意文を先頭表示し、JSON も一括出力", async () => {
+    world = buildWorld({ orders: ORDERS });
+    writeJob(world, "01_first.sql", `-- @ksql name: first\n-- @ksql dialect: 1\nSELECT * FROM LAPP_受注;\n`);
+    writeJob(world, "02_second.sql", `-- @ksql name: second\n-- @ksql depends_on: first\n-- @ksql dialect: 1\nSELECT * FROM LAPP_受注;\n`);
+    const code = await runAllCommand(world.profile, world.jobsDir, {
+      dryRun: true,
+      baseFetch: world.mock.fetch,
+      out: world.out,
+    });
+    expect(code).toBe(EXIT.OK);
+    expect(world.output[0]).toContain("ジョブ間のデータ依存は再現されません");
+    expect(world.output.join("\n").indexOf("01_first.sql")).toBeLessThan(world.output.join("\n").indexOf("02_second.sql"));
+    expect(mutationRequests(world)).toHaveLength(0);
+
+    world.output.length = 0;
+    const jsonCode = await runAllCommand(world.profile, world.jobsDir, {
+      dryRun: true,
+      json: true,
+      baseFetch: world.mock.fetch,
+      out: world.out,
+    });
+    expect(jsonCode).toBe(EXIT.OK);
+    expect(world.output).toHaveLength(1);
+    const batch = JSON.parse(world.output[0]) as { kind: string; warning: string; jobs: unknown[] };
+    expect(batch.kind).toBe("DRY_RUN_BATCH");
+    expect(batch.warning).toContain("データ依存は再現されません");
+    expect(batch.jobs).toHaveLength(2);
   });
 });
 

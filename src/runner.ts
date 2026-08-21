@@ -14,6 +14,8 @@ export interface CreateEnvOptions {
   lockLocalOnly?: boolean;
   baseFetch?: typeof fetch;
   out?: (line: string) => void;
+  dryRun?: boolean;
+  json?: boolean;
 }
 
 export interface RunnerEnvBundle extends RunnerEnv {
@@ -51,12 +53,15 @@ export function createRunnerEnv(profile: ResolvedProfile, options: CreateEnvOpti
     attemptTimeoutMs: profile.httpTimeoutMs,
     basicAuth: profile.basicAuth,
     baseFetch: options.baseFetch,
-    onRetryWait: (info) =>
+    dryRun: options.dryRun,
+    onRetryWait: (info) => {
+      if (options.json === true) return;
       out(
         `  リトライ待機: ${Math.round(info.delayMs / 100) / 10} 秒後に再試行 (試行 ${info.attempt}${
           info.status !== undefined ? ` / HTTP ${info.status}` : " / ネットワークエラー"
         })`
-      ),
+      );
+    },
   });
 
   const client = createKintoneClient(engineClientConfig(profile, http));

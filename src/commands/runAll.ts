@@ -10,13 +10,15 @@ import { createRunnerEnv, effectiveTimeoutMs, parseAsOf, RunnerEnvBundle } from 
 import { StateFile, StateStore } from "../state";
 import { EXIT, ExitCode, JobOutcome, JobStatus } from "../types";
 import { printOutcome } from "./run";
-import { dryRunJob } from "./dryrun";
+import { dryRunJob, DryRunReport } from "./dryrun";
 import { version as engineVersion } from "@rex0220/kintone-sql-tools/flow";
 
 export interface RunAllOptions {
   asOf?: string;
   dryRun?: boolean;
   strict?: boolean;
+  sample?: number;
+  json?: boolean;
   resume?: boolean;
   from?: string;
   only?: string;
@@ -51,6 +53,8 @@ export async function runAllCommand(
     lockLocalOnly: options.lockLocalOnly,
     baseFetch: options.baseFetch,
     out: options.out,
+    dryRun: options.dryRun,
+    json: options.json,
   });
   const out = env.out;
 
@@ -121,11 +125,23 @@ export async function runAllCommand(
   }
 
   if (options.dryRun === true) {
+    const warning = "ジョブ間のデータ依存は再現されません（前段ジョブの書き込みを行わないため、後段は現状データを参照します）";
+    if (options.json !== true) out(`[DRY-RUN] 注意: ${warning}`);
     let worst: ExitCode = EXIT.OK;
+    const reports: DryRunReport[] = [];
     for (const job of jobs) {
       if (selection !== null && !selection.has(job.name)) continue;
-      const code = await dryRunJob(env, job, asOf, { strict: options.strict });
-      if (code !== EXIT.OK) worst = code;
+      const code = await dryRunJob(env, job, asOf, {
+        sample: options.sample,
+        json: options.json,
+        strict: options.strict,
+        emit: options.json !== true,
+        onReport: (report) => reports.push(report),
+      });
+      worst = worseDryRunExit(worst, code);
+    }
+    if (options.json === true) {
+      out(JSON.stringify({ kind: "DRY_RUN_BATCH", warning, exitCode: worst, jobs: reports }));
     }
     return worst;
   }
@@ -389,6 +405,11 @@ export async function runAllCommand(
   } finally {
     localLock.release();
   }
+}
+
+function worseDryRunExit(left: ExitCode, right: ExitCode): ExitCode {
+  const priority: ExitCode[] = [EXIT.RUNTIME, EXIT.ABORTED, EXIT.VALIDATION, EXIT.OK];
+  return priority.indexOf(left) <= priority.indexOf(right) ? left : right;
 }
 
 function safeUser(): string {

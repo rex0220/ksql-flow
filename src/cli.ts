@@ -24,6 +24,7 @@ const VALUE_FLAGS = new Set([
   "--from",
   "--only",
   "--max-api-calls",
+  "--sample",
   "--lock",
   "--name",
 ]);
@@ -72,8 +73,10 @@ const USAGE = `kSQL Flow — kintone バッチランナー (MIT, as-is)
   ksql-flow validate -f <file.sql> [--profile p] [--strict] [--check-logapp]
   ksql-flow validate-all <jobsDir> [--profile p] [--strict]
   ksql-flow run -f <file.sql> [--profile p] [--as-of ISO8601] [--dry-run]
+                [--sample 1..50] [--json]
                 [--max-api-calls N] [--lock local-only] [--force-unlock]
   ksql-flow run-all <jobsDir> [--profile p] [--as-of ISO8601] [--dry-run]
+                [--sample 1..50] [--json]
                 [--resume] [--from file.sql] [--only file.sql]
                 [--stop-on-error | --continue-on-error]
                 [--max-api-calls N] [--lock local-only] [--force-unlock]
@@ -182,6 +185,7 @@ function loadProfile(args: ParsedArgs) {
 
 function runOptionsFromArgs(args: ParsedArgs) {
   const maxApiCalls = stringFlag(args, "--max-api-calls");
+  const sample = stringFlag(args, "--sample");
   const lock = stringFlag(args, "--lock");
   if (lock !== undefined && lock !== "local-only") {
     throw Object.assign(new Error(`--lock の値が不正です: ${lock}（指定できるのは local-only のみ）`), {
@@ -193,6 +197,8 @@ function runOptionsFromArgs(args: ParsedArgs) {
     dryRun: boolFlag(args, "--dry-run"),
     strict: boolFlag(args, "--strict"),
     maxApiCalls: maxApiCalls !== undefined ? Number(maxApiCalls) : undefined,
+    sample: sample !== undefined ? Number(sample) : undefined,
+    json: boolFlag(args, "--json"),
     lockLocalOnly: lock === "local-only",
     forceUnlock: boolFlag(args, "--force-unlock"),
   };

@@ -29,6 +29,8 @@ npm i -g @rex0220/ksql-flow
 # Node.js 18+ が必要
 ```
 
+リポジトリ開発時の通常インストールはレジストリ版 `@rex0220/kintone-sql-tools@^3.71.0` を使います。隣接するエンジン作業ツリーで結合確認するときだけ、`npm run dev:engine-local` で `file:../kintone-sql-tools` を `node_modules` へ一時適用します（`package.json` / `package-lock.json` はレジストリ参照のままです）。
+
 ## クイックスタート
 
 ```bash
@@ -51,7 +53,9 @@ ksql-flow run -f jobs/01_sync.sql --profile prod
 ksql-flow validate -f <file.sql> [--strict] [--check-logapp]   # フル検証（updateKey 制約等スキーマ依存検証を含む）
 ksql-flow validate-all <jobsDir> [--strict]                    # 一括検証（CI 用）
 ksql-flow run -f <file.sql> [--as-of ISO8601] [--dry-run]      # 単一ジョブ実行
-ksql-flow run-all <jobsDir> [--resume|--from f|--only f]       # ディレクトリ一括実行（ファイル名順 + depends_on）
+              [--sample 1..50] [--json]
+ksql-flow run-all <jobsDir> [--dry-run] [--sample 1..50] [--json]
+                [--resume|--from f|--only f]                   # ディレクトリ一括実行（ファイル名順 + depends_on）
                 [--stop-on-error | --continue-on-error]
 ksql-flow unlock                                               # ハングした前回セッションのロック解除
 ksql-flow init-logapp [--name アプリ名]                        # ログアプリの自動作成（要 password 認証）
@@ -61,8 +65,32 @@ ksql-flow init-logapp [--name アプリ名]                        # ログア�
 
 * `--as-of`: 実行基準時刻の上書き（過去日付での再集計 = バックフィル）。`@NOW()` / `@TODAY()` / `@MONTH_START()` / `@NEXT_MONTH_START()` に反映されます。**`@` なしの `TODAY()` 等は kintone サーバー評価のため as-of の対象外**です（検証時に KSQL1306 警告）。
 * `--resume`: 直近バッチの FAILED / ABORTED / TIMEOUT / 失敗起因の SKIPPED / RUNNING と、JOB レコードがない未着手ジョブのみを、**元の as-of を引き継いで**再実行します。`--from` / `--only` の選抜外として記録された `SKIPPED (filtered)` は再実行しません（ログアプリが正・`.ksql/state.json` はフォールバック）。
-* `--dry-run`: 現バージョンは**フル検証 + EXPLAIN の推定 API 消費表示**の縮退版です（差分プレビュー〈INSERT/UPDATE 件数・変更サンプル〉はエンジン側の対応待ち）。
+* `--dry-run`: read-only 文を実行し、DML は実レコードとの差分プレビューに置き換えます。`--sample N`（既定 5、1〜50）で変更サンプル数、`--json` で機械可読出力を指定できます。
 * `--lock local-only`: `logApp` 未設定時は ConfigError（Exit 1）、設定済みログアプリへ到達できない場合は Exit 3 として、既定では何も実行せず停止します。このフラグで「ローカルロックのみで続行」を明示的に許可できます（警告を表示）。
+
+## dry-run（差分プレビュー）
+
+```bash
+# 人が確認する表示（before → after、INSERT / UPDATE / DELETE 件数）
+ksql-flow run -f jobs/02_monthly_sales_sync.sql --profile stg --dry-run --sample 5
+
+# run-all は依存順に連続評価。前段を書かないためジョブ間データ依存は再現されない旨を冒頭表示
+ksql-flow run-all jobs --profile stg --dry-run
+
+# CI / PR コメント用の 1 JSON オブジェクト
+ksql-flow run-all jobs --profile stg --dry-run --json > dry-run.json
+```
+
+dry-run は SELECT / CREATE TEMP TABLE / ASSERT / EXIT / SET 等を実行し、INSERT / UPDATE / DELETE / UPSERT だけを `previewStatement` へ送ります。ASSERT 違反は `ABORTED`（Exit 2）、EXIT SUCCESS IF 成立は `NO_DATA`（Exit 0）として本実行と同じゲートになります。
+
+kintone の業務レコード、分散ロック、ログアプリ、state は更新しません。HTTP 層も変更系リクエストを下位 fetch 前に遮断します。記録先はコンソールとローカル JSONL だけです。読み取り API は実消費するため `limits.maxApiCalls` が適用され、超過時はその時点までのプレビューを残して Exit 3 で安全停止します。サンプル値は `logging.maskFields` を `***`、`logging.stripLiterals: true` 時はその他を `?` にして出力します。
+
+CI の最小構成:
+
+```bash
+ksql-flow validate-all jobs --profile stg --strict
+ksql-flow run-all jobs --profile stg --dry-run --json > dry-run.json
+```
 
 ## Exit Codes（設計書 10.3）
 
@@ -99,20 +127,20 @@ ksql-flow init-logapp [--name アプリ名]                        # ログア�
 
 | kintone-sql-tools | dialect 0 | dialect 1 | ksql-flow |
 | --- | --- | --- | --- |
+| **v3.71.0** | ✅ | ✅（`previewStatement`） | **✅ 0.1.x（dry-run 本実装）** |
 | **v3.70.0** | ✅ | ✅ | **✅ 0.1.x** |
 
 ジョブは `-- @ksql dialect: 1` を宣言してください（Flow 構文 = `ASSERT <条件>, 'msg'` / `ASSERT WARN` / `EXIT SUCCESS IF` / `MERGE` / `KEY()` / `@` 付き時刻関数）。1 スクリプトの文数上限は 20 文です。
 
 ## 制限事項（現バージョン）
 
-* `--dry-run` の差分プレビュー（変更サンプル表示）は未対応（EXPLAIN 推定のみ）。
 * チェックポイントの `last_written_key` は、最後に成功した書込チャンクの最終キー値です。書込順の保証はなく、復旧ウォーターマークではなく障害調査用の診断情報として扱います。キー値を取得できない操作ではチャンク情報のみを記録します。
 * クライアント証明書（`clientCert`）・`proxy` は未対応です。設定されている場合は、安全のため無視せず ConfigError（Exit 1）で停止します。現バージョンを使う場合はこれらの設定を削除してください。
 * 並列実行（`--parallel`）は未対応（設計書どおり初期リリースは順次実行）。
 
 ## ドキュメント
 
-* [設計書 v2.7](docs/ksql_flow_design_v2_7.md) / [エンジンからの申し送り v3.70.0](docs/kSQLエンジンからの申し送り-20260821-v3700.md) / [実装前調査報告](docs/flow_runner_survey_20260821.md)
+* [設計書 v2.8](docs/ksql_flow_design_v2_8.md) / [エンジンからの申し送り v3.71.0](docs/kSQLエンジンからの申し送り-20260822-v3710.md) / [実装前調査報告](docs/flow_runner_survey_20260821.md)
 * SQL 方言リファレンス: kintone-sql-tools [言語リファレンス §27](https://github.com/rex0220/kintone-sql-tools/blob/main/docs/ksql_language_reference.md)
 
 ## License

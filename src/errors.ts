@@ -37,6 +37,15 @@ export class ApiLimitError extends Error {
   }
 }
 
+/** dry-run 中に kintone の変更系 HTTP が発行されようとした場合の多重防壁。 */
+export class DryRunMutationError extends Error {
+  readonly exitCode: ExitCode = EXIT.RUNTIME;
+  constructor(readonly method: string, readonly path: string) {
+    super(`dry-run の副作用ゼロガードが変更系リクエストを遮断しました (${method} ${path})`);
+    this.name = "DryRunMutationError";
+  }
+}
+
 /** リトライ上限超過・ネットワーク断（Exit 3） */
 export class HttpRetryExhaustedError extends Error {
   readonly exitCode: ExitCode = EXIT.RUNTIME;
@@ -66,13 +75,23 @@ export function findHttpStatus(error: unknown): number | undefined {
  * HTTP / ネットワーク / 認証 / リトライ上限 / API 上限 → 3、それ以外（SQL 構文・検証・実行時 SQL エラー）→ 1。
  */
 export function classifyRuntimeError(error: unknown): ExitCode {
-  if (error instanceof ApiLimitError || error instanceof HttpRetryExhaustedError) return EXIT.RUNTIME;
-  if (error instanceof LockUnavailableError) return EXIT.RUNTIME;
-  if (error instanceof LockedError) return EXIT.LOCKED;
-  if (error instanceof ConfigError) return EXIT.VALIDATION;
+  if (errorChainHas(error, ApiLimitError) || errorChainHas(error, HttpRetryExhaustedError)) return EXIT.RUNTIME;
+  if (errorChainHas(error, DryRunMutationError)) return EXIT.RUNTIME;
+  if (errorChainHas(error, LockUnavailableError)) return EXIT.RUNTIME;
+  if (errorChainHas(error, LockedError)) return EXIT.LOCKED;
+  if (errorChainHas(error, ConfigError)) return EXIT.VALIDATION;
   if (findHttpStatus(error) !== undefined) return EXIT.RUNTIME;
   if (isNetworkError(error)) return EXIT.RUNTIME;
   return EXIT.VALIDATION;
+}
+
+function errorChainHas<T extends Error>(error: unknown, ctor: new (...args: never[]) => T): boolean {
+  let current = error;
+  for (let depth = 0; depth < 10 && current != null; depth++) {
+    if (current instanceof ctor) return true;
+    current = typeof current === "object" ? (current as { cause?: unknown }).cause : undefined;
+  }
+  return false;
 }
 
 /** fetch のネットワーク例外（TypeError）/ Abort を判定 */

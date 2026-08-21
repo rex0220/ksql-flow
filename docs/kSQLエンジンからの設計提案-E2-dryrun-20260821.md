@@ -1,8 +1,8 @@
 # 設計提案: E-2 dry-run（書込抑止・差分プレビュー）— 実装前の往復用
 
 - 日付: 2026-08-21 ／ 差出: kintone-sql-tools（kSQL エンジン）／ 宛先: ksql-flow
-- 位置づけ: [依頼書 E-2](../../kintone-sql-tools/docs/flow_engine_requests_20260821.md) の「実装前に設計提案を文書で往復」への提案初版（R1）。**合意後に実装着手**します。
-- ステータス: 📝 提案 R1・ksql-flow のレビュー待ち
+- 位置づけ: [依頼書 E-2](../../kintone-sql-tools/docs/flow_engine_requests_20260821.md) の「実装前に設計提案を文書で往復」への提案。
+- ステータス: ✅ **R2 確定（2026-08-22・[ksql-flow 回答](../../kintone-sql-tools/docs/flow_e2_dryrun_reply_20260822.md) を全面採用）→ 実装へ**。R1 からの確定差分は末尾「R2 確定事項」を参照。
 
 ## 0. 前提の訂正（実測）
 
@@ -87,3 +87,24 @@ E-6 / E-3 / E-5 / E-1（対応中）とは独立に実装できます。
    （ASSERT / EXIT のゲートが dry-run でも効く＝設計書 ①② の整合を意図しています）
 
 回答を受けて R2 を確定し、実装に着手します。
+
+---
+
+## R2 確定事項（2026-08-22・ksql-flow 回答を反映）
+
+1. **`previewStatement` は DML 専用**（Q5 回答の第一案を採用）。INSERT / INSERT...SELECT / UPDATE /
+   UPDATE...FROM / DELETE / UPSERT / UPSERT...SELECT（MERGE 正規化後を含む）のみ受理し、
+   非 DML・`VALIDATE ONLY` / `ON ERROR SKIP` 付き・APPLY・IMPORT・サブテーブルターゲットは
+   `ArgumentError`。振り分け（read-only 文 → `executeStatement`）は呼出側の契約
+2. `counts` は `{ insert, update, delete }` を**常に**持つ（§10.2 へ直接写像）。`update` は
+   「キー一致して UPDATE 対象となる件数」（unchanged 判定は初版に含めない）
+3. `samples` は既定 5・**上限 50**。整数 1〜50 以外は**読取開始前に** `ArgumentError`。
+   INSERT / UPDATE / UPSERT はキー値（可能な場合）と before / after（**代入対象列のみ**）、
+   DELETE は削除対象キー（業務キー宣言がなければ `$id`）のみ・`before` 省略
+4. `reads` = preview が実消費した読取 API 数（追加 hook 不要＝注入 client を全読取が通るため、
+   ランナーの単一カウンタでも計上可能）。`estimatedWrites` = 本実行時の 100 件単位の推定書込 API 数
+5. 渡された `ExecutionContext` の TEMP TABLE・変数・as-of / timezone をそのまま参照し、
+   **preview 後も同じ context で後続文を処理できる**
+6. preview は**書込 API 0 回**（エンジン内部で書込ブロックを構造的に保証）。TOCTOU・kintone 自動設定値・
+   lookup 連動値は保証外。`PreviewSample` の値はマスキング前データ＝ログ/画面出力前の
+   マスキング責務はランナー側（`logging.maskFields` / `stripLiterals`）
