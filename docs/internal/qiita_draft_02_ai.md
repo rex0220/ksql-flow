@@ -75,15 +75,33 @@ flowchart LR
     └── monthly_deal_summary.sql   # 検証済みサンプルジョブ
 ```
 
-やることは、依存のインストール・接続設定の書き換え・トークンの配置だけです（Node.js 20.6+。グローバルインストールは不要で、ランナーも MCP サーバーもリポジトリ内に入ります）。
+### 環境構築（初回 15 分）
+
+前提: Node.js 20.6+ / VSCode + Claude Code / 第1話のアプリ構成（営業支援パック + 追加 3 フィールド + 実行ログアプリ）。グローバルインストールは不要で、ランナーも MCP サーバーもリポジトリ内に入ります。
+
+**1. テンプレートから自分のリポジトリを作る** — テンプレートページ右上の「Use this template → Create a new repository」。設定にアプリ ID や業務用語が入るので **Private で作成**します（visibility は Public が初期値なので注意）。GitHub CLI なら 1 行:
 
 ```bash
 gh repo create my-ksql-jobs --template rex0220/ksql-flow-template --private --clone
-cd my-ksql-jobs
-npm install
 ```
 
-`ksql.config.json`（ランナー用）と `ksql.mcp.config.json`（MCP 用）の `baseUrl` とアプリ `id` を自環境に合わせます（アプリ ID や業務用語が入るのでリポジトリは Private 推奨）。ここで 1 つだけ設計上のポイントがあります — テンプレートでは **MCP 側の `logicalApps` の論理名を、ランナー config の `apps` と同じ名前にしてあります**。こうすると、AI が対話中に書く `LAPP_案件管理` という表記が、**MCP での下見クエリと kSQL Flow のジョブでそのまま同じ意味になります**。生成した SQL を書き換えずにジョブファイルへ移せる、というのがこの構成の要です。
+**2. 依存を入れる** — ランナーとエンジン + MCP サーバーが入ります。これだけです。
+
+```bash
+cd my-ksql-jobs && npm install
+```
+
+**3. 実行ログアプリを作る** — 第1話で作成済みならそのまま。未作成なら kSQL Flow 同梱の[アプリテンプレート](https://github.com/rex0220/ksql-flow/tree/main/template)から約 3 分です。
+
+**4. 接続設定を書き換える** — `ksql.config.json`（ランナー用）と `ksql.mcp.config.json`（MCP 用）の `baseUrl` とアプリ `id` を自環境に合わせます。トークン値はこの 2 ファイルには書きません。
+
+**5. トークンを置く** — `.env.example` をコピーして `.env` を作り、**閲覧のみトークン**を貼ります（分離の設計は後述）。
+
+**6. VSCode で開いて Claude Code を起動** — 初回に kSQL MCP サーバーの使用可否を聞かれるので許可します（登録内容は `.mcp.json`）。
+
+**7. 疎通確認** — Claude Code に「`ksql_describe_app` で `LAPP_案件管理` のフィールド一覧を見せて」と指示し、フィールドコードと型が返ってくれば準備完了。ターミナル側は `npm run check-logapp -- --profile prod` でログアプリの定義検査まで通ります。
+
+設計上のポイントを 1 つだけ — テンプレートでは **MCP 側の `logicalApps` の論理名を、ランナー config の `apps` と同じ名前にしてあります**。こうすると、AI が対話中に書く `LAPP_案件管理` という表記が、**MCP での下見クエリと kSQL Flow のジョブでそのまま同じ意味になります**。生成した SQL を書き換えずにジョブファイルへ移せる、というのがこの構成の要です。
 
 ### AI に kSQL Flow の知識を与える — CLAUDE.md と ksql_docs
 
@@ -103,7 +121,7 @@ npm install
 | `.env`（`.env.example` をコピーして作成・Git 管理外） | 閲覧のみ | MCP のスキーマ確認・下見クエリ、`npm run validate` / `npm run dry-run` |
 | 本実行する人間の OS 環境変数（`setx` 等） | 閲覧 + 編集（+ 追加） | `npm run job`（本実行） |
 
-MCP サーバーも npm scripts も Node の `--env-file=.env` 経由で動き、**OS の環境変数は `.env` より優先**されます。つまり `.env` は閲覧のみのまま置いておけて、書込可トークンを OS 環境変数に設定した人間のターミナルでだけ本実行が通ります。**AI は validate と dry-run まで自走できますが、物理的に kintone へ書き込めません**。運用ルールではなく構成で守ります。
+MCP サーバーも npm scripts も Node の `--env-file=.env` 経由で動き、**OS の環境変数は `.env` より優先**されます。つまり `.env` は閲覧のみのまま置いておけて、書込可トークンを OS 環境変数に設定した人間のターミナルでだけ本実行が通ります（Windows の `setx` で設定した場合、反映には **VSCode の全ウィンドウを閉じての再起動**が必要です — Reload Window では反映されません）。**AI は validate と dry-run まで自走できますが、物理的に kintone へ書き込めません**。運用ルールではなく構成で守ります。
 
 ## 要件文からジョブを作らせる
 
