@@ -268,8 +268,7 @@ ksql-flow run -f jobs/monthly_deal_summary.sql --profile prod
 
 - 実行ログ例
 
-![2026-08-22_18h26_46.png](https://qiita-image-store.s3.ap-northeast-1.amazonaws.com/0/100572/cd40ec57-ac4c-4ad9-91d7-e2f91b25a51b.png)
-
+![2026-08-22_18h34_52.png](https://qiita-image-store.s3.ap-northeast-1.amazonaws.com/0/100572/552cf297-7394-4e1f-87ea-7bfc49ea172d.png)
 
 ### 定期実行はお好みの場所で
 
