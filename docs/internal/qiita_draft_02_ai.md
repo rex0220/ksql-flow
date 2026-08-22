@@ -67,19 +67,23 @@ flowchart LR
 ```text
 ├── CLAUDE.md                 # AI 向けの作業規約（後述 — この構成の核）
 ├── .mcp.json                 # Claude Code の MCP 登録（開くだけで kSQL MCP がつながる）
+├── package.json              # 依存（ランナー + エンジン/MCP）と npm scripts
 ├── ksql.config.json          # ランナー用の接続設定 — トークンは env: 参照
 ├── ksql.mcp.config.json      # MCP 用の接続設定 — 閲覧のみトークン
+├── .env.example              # トークンの置き場所の雛形（.env は .gitignore 済み）
 └── jobs/
     └── monthly_deal_summary.sql   # 検証済みサンプルジョブ
 ```
 
-やることは、ツールのインストールと接続設定の書き換えだけです。
+やることは、依存のインストール・接続設定の書き換え・トークンの配置だけです（Node.js 20.6+。グローバルインストールは不要で、ランナーも MCP サーバーもリポジトリ内に入ります）。
 
 ```bash
-npm i -g @rex0220/ksql-flow @rex0220/kintone-sql-tools
+gh repo create my-ksql-jobs --template rex0220/ksql-flow-template --private --clone
+cd my-ksql-jobs
+npm install
 ```
 
-`ksql.config.json`（ランナー用）と `ksql.mcp.config.json`（MCP 用）の `baseUrl` とアプリ `id` を自環境に合わせます。ここで 1 つだけ設計上のポイントがあります — テンプレートでは **MCP 側の `logicalApps` の論理名を、ランナー config の `apps` と同じ名前にしてあります**。こうすると、AI が対話中に書く `LAPP_案件管理` という表記が、**MCP での下見クエリと kSQL Flow のジョブでそのまま同じ意味になります**。生成した SQL を書き換えずにジョブファイルへ移せる、というのがこの構成の要です。
+`ksql.config.json`（ランナー用）と `ksql.mcp.config.json`（MCP 用）の `baseUrl` とアプリ `id` を自環境に合わせます（アプリ ID や業務用語が入るのでリポジトリは Private 推奨）。ここで 1 つだけ設計上のポイントがあります — テンプレートでは **MCP 側の `logicalApps` の論理名を、ランナー config の `apps` と同じ名前にしてあります**。こうすると、AI が対話中に書く `LAPP_案件管理` という表記が、**MCP での下見クエリと kSQL Flow のジョブでそのまま同じ意味になります**。生成した SQL を書き換えずにジョブファイルへ移せる、というのがこの構成の要です。
 
 ### AI に kSQL Flow の知識を与える — CLAUDE.md と ksql_docs
 
@@ -96,10 +100,10 @@ npm i -g @rex0220/ksql-flow @rex0220/kintone-sql-tools
 
 | 置き場所 | トークン | できること |
 | --- | --- | --- |
-| MCP 設定 + Claude Code セッションの環境変数 | 閲覧のみ（`_RO`） | スキーマ確認・下見クエリ・`validate`・`--dry-run` |
-| 人間のターミナルの環境変数 | 閲覧 + 編集（+ 追加） | `ksql-flow run`（本実行） |
+| `.env`（`.env.example` をコピーして作成・Git 管理外） | 閲覧のみ | MCP のスキーマ確認・下見クエリ、`npm run validate` / `npm run dry-run` |
+| 本実行する人間の OS 環境変数（`setx` 等） | 閲覧 + 編集（+ 追加） | `npm run job`（本実行） |
 
-つまり **AI は validate と dry-run まで自走できますが、物理的に kintone へ書き込めません**。書き込みが起きる経路は「人間が自分のターミナルで `ksql-flow run` を叩く」だけです。運用ルールではなく構成で守ります。
+MCP サーバーも npm scripts も Node の `--env-file=.env` 経由で動き、**OS の環境変数は `.env` より優先**されます。つまり `.env` は閲覧のみのまま置いておけて、書込可トークンを OS 環境変数に設定した人間のターミナルでだけ本実行が通ります。**AI は validate と dry-run まで自走できますが、物理的に kintone へ書き込めません**。運用ルールではなく構成で守ります。
 
 ## 要件文からジョブを作らせる
 
@@ -189,12 +193,12 @@ monthly_deal_summary.sql: NG (エラー 1 件 / 警告 0 件)
 | 段階 | コマンド / ツール | 見るもの | いつ |
 | --- | --- | --- | --- |
 | 一次 | MCP `ksql_validate` | 構文・dialect 1 のルール・MCP 設定でのスキーマ | AI との対話中（即時） |
-| 二次 | `ksql-flow validate -f jobs/...` | **実行環境の** config・トークン・実スキーマ（UPSERT キーの実在と重複禁止まで） | ジョブファイル保存後 |
+| 二次 | `npm run validate`（ランナーの validate） | **実行環境の** config・トークン・実スキーマ（UPSERT キーの実在と重複禁止まで） | ジョブファイル保存後 |
 
 一次検証は MCP 経由で対話の中で終わります。二次検証は「実行環境でも同じ結論になるか」の確認で、VSCode + Claude Code 構成なら**これも AI がターミナルで実行し、結果を読んで自分で直すところまで自走**できます。MCP の設定と実行環境の config が食い違っていた（アプリ ID が違う等）というズレは、ここで出ます。
 
 ```bash
-ksql-flow validate -f jobs/monthly_deal_summary.sql --profile prod
+npm run validate -- -f jobs/monthly_deal_summary.sql --profile prod
 ```
 
 ## dry-run が人間の最終レビュー
@@ -202,7 +206,7 @@ ksql-flow validate -f jobs/monthly_deal_summary.sql --profile prod
 最後の関門は機械ではなく人間です。ただしレビュー対象は SQL の字面ではなく、**「実行したら実際に何が起きるか」の差分**です。dry-run は閲覧トークンで動くので、ここまでは AI が実行して結果を会話に貼るところまで自走できます。
 
 ```bash
-ksql-flow run -f jobs/monthly_deal_summary.sql --profile prod --dry-run
+npm run dry-run -- -f jobs/monthly_deal_summary.sql --profile prod
 ```
 
 ```
@@ -217,7 +221,11 @@ ksql-flow run -f jobs/monthly_deal_summary.sql --profile prod --dry-run
 
 「山田商事が 145 万に更新され、鈴木建設が新規で入る。件数は 2 件」— この粒度なら、SQL を読めない人でも承認判断ができます。`ASSERT` や `EXIT SUCCESS IF` の判定は dry-run でも本実行と同じに効くので、業務異常があればこの段階で Exit 2 で止まります。
 
-問題なければ、人間が**自分のターミナル**（書込可トークンが設定してある側）で `run` を実行します。AI に本実行させないのは運用ルールではなく構成です — AI 側の環境には書き込めるトークンがありません。
+問題なければ、人間が**自分のターミナル**（書込可トークンを OS 環境変数に設定してある側）で本実行します。AI に本実行させないのは運用ルールではなく構成です — AI 側の `.env` には書き込めるトークンがありません。
+
+```bash
+npm run job -- -f jobs/monthly_deal_summary.sql --profile prod
+```
 
 ## ジョブは Git へ — AI の成果物を運用資産にする
 
