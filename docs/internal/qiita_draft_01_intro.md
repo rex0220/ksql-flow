@@ -16,6 +16,31 @@ kintone でアプリ間集計や定期データ更新（月次売上をマスタ
 
 SQL の解析・実行エンジンは、以前紹介した [kintone-sql-tools](https://github.com/rex0220/kintone-sql-tools)（kSQL）の公式 API を使っています。つまり **MCP で AI に SQL を書かせて、同じ方言でバッチも動かせる**構成です（この話は次回）。
 
+## しくみ
+
+```mermaid
+flowchart TD
+    SQL["jobs/*.sql<br/>（Git 管理）"]
+    CONFIG["ksql.config.json<br/>（トークンは env: 参照）"]
+
+    subgraph FLOW["kSQL Flow（CLI ランナー）"]
+        direction TB
+        OPS["排他ロック / dry-run / リラン<br/>リトライ / API 上限 / 通知"]
+        ENGINE["kSQL エンジン<br/>（kintone-sql-tools /flow API）<br/>SQL 解析・検証・実行・差分プレビュー"]
+        OPS --> ENGINE
+    end
+
+    SQL --> FLOW
+    CONFIG --> FLOW
+
+    ENGINE -->|"REST API<br/>（読み取り・UPSERT / DML）"| APPS["kintone 業務アプリ<br/>（受注・顧客マスタ など）"]
+    OPS -->|"実行記録 +<br/>job_key 分散ロック"| LOG["kintone ログアプリ<br/>（同梱テンプレートで作成）"]
+    OPS -->|"失敗通知 / heartbeat"| HOOK["Webhook<br/>（Slack など）"]
+    LOG -.->|"到達不能時は<br/>ローカル JSONL へ退避 → 次回再送"| JSONL[".ksql/logs/*.jsonl"]
+```
+
+登場人物は 4 つだけです。**kSQL Flow**（ランナー）が SQL と設定を読み、内包する **kSQL エンジン**が kintone の**業務アプリ**を読み書きします。もう 1 つの **ログアプリ**が影の主役で、実行記録・メトリクスの保存に加えて、重複禁止フィールドを使った**分散ロック**と `--resume` の**再開情報の正**を兼ねます。通信先はこの kintone とお好みの Webhook だけです。
+
 ## ジョブは SQL ファイル 1 本
 
 月次売上を顧客マスタへ反映するジョブの全文です。
