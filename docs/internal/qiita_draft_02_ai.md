@@ -235,6 +235,34 @@ KEY (会社名);
 
 そして AI にできるのはここまでです。**kSQL はデータの読み書き専用で、アプリのフォーム変更はできません。** だから報告の結論は「要対応: この 3 フィールドを追加すること」という**人間への要求**になります。ジョブは書けるがアプリ構造には手が届かない — この分離も、閲覧のみトークンと同じく構成で決まっている境界です。
 
+
+## フィールドを追加して、本実行まで
+
+要求どおり 3 フィールドを kintone のフォームに追加し（人間の作業・約 1 分）、Claude Code に再検証させました。報告の要点:
+
+- **スキーマ実測**: 顧客管理に `当月案件件数`（NUMBER）・`当月売上合計`（NUMBER）・`最終集計日時`（DATETIME）が正しいフィールドコードで追加されたことを `ksql_describe_app` で確認
+- **書き込み経路の `VALIDATE ONLY`**（データのある 2025-12 条件・書込 API 消費なし）: 前回失敗していた箇所が**エラー 0 で通過**
+- **二次検証** `npm run validate -- --profile prod`: OK
+- **dry-run**: 当月（2026-08）は対象 0 件のため NO_DATA（exit 0）で正常スキップ・書込 0 件
+
+締めの報告はこうでした（実物）:
+
+> 再検証はすべて OK です。ブロッカーは解消され、ジョブは本実行可能な状態になりました。あとは本実行のみで、こちらはご自身のターミナルでお願いします。今月は 0 件スキップ（exit 0）になる想定です。
+
+最後の一文まで含めて役割分担どおりです。人間のターミナル（書込可トークンを OS 環境変数に設定してある側）で本実行:
+
+```
+my-ksql-jobs  [main ≡ +0 ~2 -1 !] > npm run job -- -f jobs/monthly_deal_summary.sql --profile prod
+
+> ksql-flow-template@1.0.0 job
+> node --env-file=.env node_modules/@rex0220/ksql-flow/dist/cli.js run -f jobs/monthly_deal_summary.sql --profile prod
+
+[RUN] monthly_deal_summary.sql (profile: prod, as-of: 2026-08-22T13:08:22.143Z)
+  => NO_DATA (exit 0) 読取 0 件 / 書込 0 件 / API 5 回
+```
+
+AI の宣言どおり NO_DATA（exit 0）で着地しました。アラートは鳴らず、実行ログアプリには NO_DATA の 1 レコードが残ります。「対象がない月は静かに成功する」（第1話の設計ポイント①）が、AI の書いたジョブでもそのまま機能した形です。集計経路を実データで動かしたい場合は、`--as-of "2025-12-01T00:00:00+09:00"` を付けてバックフィル実行すれば、2025-12 分の UPSERT が走ります。
+
 ## 機械の検査が AI のミスを捕まえる（実例）
 
 「AI は間違える」前提で、どの間違いがどこで捕まるかを実際に試した結果です。
@@ -292,6 +320,8 @@ npm run validate -- -f jobs/monthly_deal_summary.sql --profile prod
 ```bash
 npm run dry-run -- -f jobs/monthly_deal_summary.sql --profile prod
 ```
+
+今回の実走は 0 件月だったので差分なしの正常スキップでしたが、対象がある月にはこんな差分が出ます（出力例）:
 
 ```
 [DRY-RUN] monthly_deal_summary.sql (as-of: 2026-08-22T00:00:00.000Z)
