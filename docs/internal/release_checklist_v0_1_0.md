@@ -41,10 +41,10 @@
 
 | # | 項目 | 担当 |
 | --- | --- | --- |
-| 2-1 | `rex0220/ksql-flow` を public で作成・`main` を push | Takashi（作成）→ Codex（push はどちらでも） |
-| 2-2 | **リポジトリ設定: Issues 無効化・Discussions / Wiki / Projects オフ**（サポートポリシー 15.1 の構造的クローズ。忘れやすいので公開直後に必ず） | Takashi |
-| 2-3 | タグ `v0.1.0` + GitHub Release 作成（リリースノート: 概要・as-is 注意・互換表・既知の制限〈run-all --dry-run のデータ依存非再現・Q7 の診断情報扱い〉） | Codex 起草 → Takashi 発行 |
-| 2-4 | Windows 単一バイナリを Release アセットとして添付（チェックサム付き、設計書 15 章） | Codex |
+| 2-1 ✅ | `rex0220/ksql-flow` を public で作成・`main` を push | Takashi（作成）→ Codex（push はどちらでも） |
+| 2-2 ✅ | **リポジトリ設定: Issues 無効化・Discussions / Wiki / Projects オフ**（サポートポリシー 15.1 の構造的クローズ。忘れやすいので公開直後に必ず） | Takashi |
+| 2-3 ✅ | タグ `v0.1.0` + GitHub Release 作成（リリースノート: 概要・as-is 注意・互換表・既知の制限〈run-all --dry-run のデータ依存非再現・Q7 の診断情報扱い〉） | Codex 起草 → Takashi 発行 |
+| 2-4 ✅ | Windows 単一バイナリを Release アセットとして添付（チェックサム付き、設計書 15 章） | Codex |
 
 ## Phase 3: npm 公開
 
