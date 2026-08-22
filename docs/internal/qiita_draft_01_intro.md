@@ -163,7 +163,16 @@ npm i -g @rex0220/ksql-flow   # Node.js 18+
 
 「しくみ」の図に出てきた実行ログアプリは、**同梱のアプリテンプレートから作ります**。フィールド定義（分散ロック用の重複禁止設定まで）とレイアウト・一覧が設定済みです。
 
-1. [テンプレート zip](https://github.com/rex0220/ksql-flow/raw/main/template/ksql-flow-log-template1.zip) をダウンロード（npm でインストール済みならパッケージ内の `template/` にもあります）
+1. [テンプレート zip](https://github.com/rex0220/ksql-flow/raw/main/template/ksql-flow-log-template1.zip) をダウンロード
+
+   ダウンロード不要で手元のものを使う場合は、インストール済みパッケージ内のテンプレートフォルダを直接開けます:
+
+   ```powershell
+   # Windows (PowerShell)
+   explorer "$(npm root -g)\@rex0220\ksql-flow\template"
+   ```
+
+   （macOS / Linux は `$(npm root -g)/@rex0220/ksql-flow/template` にあります）
 2. kintone システム管理 → アプリテンプレート → 読み込み → テンプレート「kSQL Flow 実行ログ」からアプリを作成
 3. 作成したアプリで API トークン（閲覧 + 追加 + 編集）を発行し、config の `logApp` に登録
 
