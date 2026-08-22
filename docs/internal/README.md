@@ -18,5 +18,5 @@ as-is 公開方針（設計書 15.1）に基づき、本ディレクトリも公
 | 調査・完了報告 | `flow_runner_survey_20260821.md`（実装前調査 §4）/ `flow_runner_report_20260821.md`（M1-M7 完了報告） |
 | レビュー往復 | `reviews/` — コードレビュー・修正回答・**裁定ログ `reviews/decisions.md`（Q1〜Q7）** |
 | エンジンとの申し送り | `kSQLエンジンからの申し送り-*`（v3.69.0 / v3.70.0 / v3.71.0）/ `kSQLエンジンからの設計提案-E2-*` / `kSQL Flowからの*`（E2 回答・fix4 完了報告） |
-| リリース | `release_checklist_v0_1_0.md`（公開チェックリスト）/ `release_verification_v0_1_0.md`（Phase 0 実機検証記録 — 実機限定バグ 3 件の検出記録を含む） |
+| リリース | `release_checklist_v0_1_0.md`（公開チェックリスト）/ `release_verification_v0_1_0.md`（Phase 0 実機検証記録 — 実機限定バグ 3 件の検出記録を含む）/ **v0.1.0 は 2026-08-22 公開完了**（GitHub / Release / npm） |
 | 設計書（開発版・旧版） | `ksql_flow_design_v2_5.md` 〜 `v2_9.md`。**開発経緯・改訂履歴・裁定参照付きの正本は `v2_9`**。リリース版（履歴除去済み）は [`../ksql_flow_spec.md`](../ksql_flow_spec.md) |
