@@ -94,7 +94,7 @@ EXIT SUCCESS IF (SELECT COUNT(*) FROM temp_monthly_summary) = 0,
 
 -- Step 4: キー指定 UPSERT（何度リランしても同じ結果になる = 冪等）
 UPSERT INTO LAPP_顧客管理 (会社名, 当月案件件数, 当月売上合計, 最終集計日時)
-SELECT 会社名, 案件件数, 売上合計, @NOW()
+SELECT 会社名, 案件件数, 売上合計, @NOW()  -- @NOW() は実時計ではなくバッチ開始時の基準時刻（as-of）
 FROM temp_monthly_summary
 KEY (会社名);
 ```
