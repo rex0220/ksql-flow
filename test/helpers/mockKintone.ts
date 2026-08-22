@@ -9,6 +9,7 @@ export interface MockFieldDef {
   label?: string;
   unique?: boolean;
   required?: boolean;
+  options?: string[];
   /** SUBTABLE の子フィールド */
   fields?: Record<string, MockFieldDef>;
 }
@@ -157,11 +158,24 @@ export class MockKintone {
         return jsonResponse(200, { app: String(id), revision: "1" });
       }
       case "POST /k/v1/preview/app/form/fields.json": {
-        const request = body as { app: number; properties: Record<string, { type: string; label?: string; unique?: boolean }> };
+        const request = body as {
+          app: number;
+          properties: Record<string, {
+            type: string;
+            label?: string;
+            unique?: boolean;
+            options?: Record<string, { index?: string }>;
+          }>;
+        };
         const entry = this.apps.get(Number(request.app));
         if (!entry) throw new MockApiError(404, "GAIA_AP01", `app ${request.app} not found`);
         for (const [code, property] of Object.entries(request.properties)) {
-          entry.def.fields[code] = { type: property.type, label: property.label, unique: property.unique };
+          entry.def.fields[code] = {
+            type: property.type,
+            label: property.label,
+            unique: property.unique,
+            ...(property.options !== undefined ? { options: Object.keys(property.options) } : {}),
+          };
         }
         return jsonResponse(200, { revision: "2" });
       }
@@ -321,6 +335,9 @@ function fieldProperty(code: string, def: MockFieldDef): Record<string, unknown>
   };
   if (def.unique === true) property.unique = true;
   if (def.required === true) property.required = true;
+  if (def.options !== undefined) {
+    property.options = Object.fromEntries(def.options.map((option, index) => [option, { label: option, index: String(index) }]));
+  }
   if (def.type === "SUBTABLE" && def.fields) {
     const children: Record<string, unknown> = {};
     for (const [childCode, child] of Object.entries(def.fields)) {

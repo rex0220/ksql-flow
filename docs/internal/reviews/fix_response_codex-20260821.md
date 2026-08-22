@@ -241,6 +241,60 @@
 - `../kintone-sql-tools` 変更なし
 - 詳細は `docs/release_verification_v0_1_0.md` に記録
 
+## fix5（PRE-1〜PRE-6 公開ゲート・2026-08-22）
+
+### PRE-1: CLI fail-open の解消
+
+- `src/cli.ts` に command 別 allowlist / positional count / flag kind の事前検証を追加した。未知・不適用 flag、余分な positional、`-f` / `--file` 二重指定、`--resume` / `--from` / `--only`、`--stop-on-error` / `--continue-on-error` の競合を、config 読取・API 呼び出し・ファイル変更より前に usage error（Exit 1）とする。
+- `--json` / `--sample` は `--dry-run` 併用時のみ受理し、`--check-logapp` は validate の allowlist にのみ置いた。help に unlock blast radius と排他・dry-run 専用制約を追記した。
+- 変更ファイル: `src/cli.ts`, `test/__tests__/cli_contract.test.ts`, `README.md`, `docs/ksql_flow_design_v2_9.md`。
+- 追加テスト: `CLI public contract` の全 6 command 許可 table、全 6 command 拒否 table、競合 / extra positional / dry-run 専用 8 ケース、`--dryrun typo は設定読取や実行へ進まず Exit 1`（計 21 tests）。`--strcit` typo も拒否 table に含む。
+
+### PRE-2: 正本 v2.9 と scope の一意化
+
+- `docs/ksql_flow_design_v2_9.md` を v2.8 ベースで新規作成した。§9.1 の clientCert / proxy は v0.1 非対応・設定時 ConfigError（Exit 1）の fail-closed、§7.2 / §10.1 / §14 の validate 推定 API 消費・推定所要時間は v0.1 非対応で、推定は `--dry-run` の EXPLAIN / preview で提供する契約へ統一した。冒頭 changelog と付録 C に fix5 を追加し、裁定 Q1〜Q7 は変更していない。
+- 変更ファイル: `docs/ksql_flow_design_v2_9.md`, `README.md`, `CLAUDE.md`, `AGENTS.md`, `CHANGELOG.md`。
+- 既存テスト: `未対応の接続設定 clientCert / proxy は ConfigError で停止する` を維持して PASS。仕様縮退のため新規実装テストは追加していない。
+
+### PRE-3: 公開契約 baseline
+
+- `schema/ksql.config.schema.json` を config 契約の正として追加し、`package.json#files` に `schema` を追加した。runtime はトップレベル、全 profile、apps entry、limits / retry / notifications と子要素 / logging / auth / basicAuth / clientCert の未知キーを ConfigError にする。
+- dry-run の `DRY_RUN` / `DRY_RUN_BATCH` top-level に `formatVersion: 1` を追加した。exact shape、additive field、破壊変更時の version 繰上げ規則を v2.9 §10.2 と README に記載した。
+- JSONL は全イベントを `{ v: 1, ts, event, batchId, profile, ...payload }` envelope へ統一し、安定イベントと内部 best-effort イベントを README / v2.9 §8.3 で線引きした。
+- state path を `.ksql/state-<profile>.json` とし、未知 schemaVersion / 破損は警告表示後に null fallback する。README に「Public contracts in v0.1」表を追加した。
+- 変更ファイル: `schema/ksql.config.schema.json`, `package.json`, `package-lock.json`, `src/config.ts`, `src/commands/dryrun.ts`, `src/commands/runAll.ts`, `src/logging/jsonl.ts`, `src/runner.ts`, `src/state.ts`, `README.md`, `docs/ksql_flow_design_v2_9.md`, `test/__tests__/config.test.ts`, `test/__tests__/state_contract.test.ts`, `test/__tests__/dryrun_logapp.test.ts`, `test/__tests__/run.test.ts`。
+- 追加テスト: unknown-key 8 層 + `stripLiteral` typo（9 tests）、未知 state version / 破損 JSON（2 tests）。既存 dry-run JSON / JSONL テストへ `formatVersion` / envelope assertion を追加した。
+
+### PRE-4: ログアプリ契約検証
+
+- `--check-logapp` が `record_type` の BATCH/JOB と `status` の 7 値を順序非依存の完全一致で検査し、不足・過剰を個別表示するようにした。
+- MIT の devDependency `adm-zip` を追加し、配布 ZIP `01/template.json` の 22 code / type / job_key unique / dropdown options を `LOG_APP_FIELDS` と機械突合する常設 Jest test を追加した。
+- 変更ファイル: `src/commands/initLogapp.ts`, `test/helpers/mockKintone.ts`, `test/helpers/world.ts`, `test/__tests__/dryrun_logapp.test.ts`, `test/__tests__/template_contract.test.ts`, `package.json`, `package-lock.json`。
+- 追加テスト: `record_type / status の不足・過剰選択肢を NG 表示する`、`template.json の code/type/unique/options が LOG_APP_FIELDS と一致する`（2 tests）。
+
+### PRE-5: 配布・ランタイムの約束
+
+- CI test matrix を Node 18 / 20 / 22 にした。独立 pack job で Node 18、build、`npm pack`、必須 tarball entry、`src/` / `test/` 非混入、temp prefix install、インストール済み `ksql-flow --help` を検査する。
+- README クイックスタートは本文の最小 JSON を `ksql.config.json` として保存する手順を正とし、examples は npm package 外の GitHub 参照であることを明記した。
+- 変更ファイル: `.github/workflows/ci.yml`, `README.md`, `package.json`。
+- ローカル smoke: tarball 26 files / 54,111 bytes、schema / template / dist CLI / README / LICENSE を確認し、別 prefix install 後の `ksql-flow --help` Exit 0。実 kintone 通信なし。
+
+### PRE-6: unlock blast radius
+
+- `unlock` はログアプリの対象一覧取得に成功してから解除し、同一 profile の全 RUNNING が対象であること、件数、各 jobKey / startedAt を解除前に出力する。対象取得不能時は何も解除せず Exit 3 とする。
+- run / run-all の `--force-unlock` も分散 RUNNING の解除前に同じ一覧を表示する。batchId / jobKey 指定解除は実装せず POST 課題のままとした。
+- 変更ファイル: `src/commands/unlock.ts`, `src/commands/run.ts`, `src/commands/runAll.ts`, `src/cli.ts`, `README.md`, `docs/ksql_flow_design_v2_9.md`, `test/__tests__/locking.test.ts`。
+- 追加 assertion: 既存 `unlock コマンドがローカルロックと RUNNING レコードを解除する` に全 RUNNING 表示・件数・jobKey を追加（test 数は不変）。
+
+### fix5 検証結果
+
+- テスト件数: **101 → 135**（9 → 12 suites、純増 34 tests）。`npm test -- --runInBand`: 12 suites / 135 tests PASS。
+- `npm run typecheck`: PASS。
+- `npm run build`: PASS。
+- `git diff --check`: PASS。
+- npm pack / tarball 内容 / 別 prefix install / `ksql-flow --help`: PASS。
+- 実 kintone 通信なし。`../kintone-sql-tools`、`~/.ksql-flow-dev/` は変更していない。
+
 ## phase1（初回公開準備・2026-08-22）
 
 ### 1-1 秘密情報スキャン
@@ -273,3 +327,34 @@
 - `.github/workflows/ci.yml` を追加。push / pull_request で Node.js 20 / 22 の matrix、`npm ci`、`npm ls @rex0220/kintone-sql-tools@^3.71.0`、`npm test`、`npm run build` を実行し、dependency は `package-lock.json` の npm registry tarball を使う。
 - README 冒頭へ `ci.yml` の GitHub Actions バッジを追加した。公開後の実バッジ状態は Phase 2 の push 後に GitHub 上で確認する。
 - ローカル最終検証: `npm test` は 9 suites / 101 tests PASS、`npm run build` PASS、`git diff --check` PASS。
+
+## fix6（リリース版仕様書レビュー C-1 / C-2 / C-5・2026-08-22）
+
+### C-1: command help の fail-closed 化
+
+- `src/cli.ts` で、コマンド付き `--help` / `-h` は command 別 allowlist・positional 数・競合 flag の `validateArgs` を通過した後にだけ usage を表示するようにした。`run --help --bogus` と `run --help extra` は設定読取や実行へ進まず Exit 1 になる。
+- コマンドなしの `--help` / `-h` / `help` 単独は従来どおり usage を表示して Exit 0。コマンド付きの正常な `run --help` / `run -h` も Exit 0 を維持する。
+- 変更ファイル: `src/cli.ts`, `test/__tests__/cli_contract.test.ts`。
+- 追加テスト: `command help より 未知フラグ の拒否を優先して Exit 1`、`command help より 余分な positional の拒否を優先して Exit 1`、`command 付き -h は allowlist 検査後に usage を表示して Exit 0`、`command なしの --help / -h / help 単独は usage を表示して Exit 0`（table 3 cases）。
+
+### C-2: heartbeat `on: success / always` の実行時反映
+
+- `src/notify.ts` に送信条件を集約した。`on: success`（config 省略時の既定）は `SUCCESS` / `NO_DATA` のみ、`on: always` は失敗を含む完了ステータスでも heartbeat を送信する。
+- `src/commands/run.ts` / `src/commands/runAll.ts` は失敗時も heartbeat 処理を呼び、`always` では `onFailure` の後に heartbeat を併送する。`onFailure` の対象・抑制規則は変更していない。heartbeat POST body の既存 `{ status }` を維持した。
+- 変更ファイル: `src/notify.ts`, `src/commands/run.ts`, `src/commands/runAll.ts`, `test/__tests__/run.test.ts`, `test/__tests__/runAll.test.ts`, `README.md`。
+- 追加テスト: `heartbeat on: success は ABORTED 時に送らず onFailure のみ送る`、`heartbeat on: always は ABORTED 時も onFailure と併送し status を含める`、`run-all の heartbeat on: always は ABORTED 時も onFailure と併送する`。
+
+### C-5: JSONL / 再送キュー書込失敗の警告
+
+- `JsonlLogger.append` と `PendingQueue.enqueue` の書込失敗時に、stderr へ固定文言の警告を出して実行を継続するようにした。例外本文や書込 payload を警告へ含めず、認証情報を露出しない。同一 logger / queue インスタンスでは最初の失敗時だけ警告する。
+- README の絶対保証を best-effort・警告継続の説明へ合わせた。公開 README の「裁定 Q1」参照を削除し、heartbeat の値域・既定・送信条件を仕様書 §7.3 と一致させた。凍結対象 `docs/internal/ksql_flow_design_v2_9.md` は変更していない。
+- 変更ファイル: `src/logging/jsonl.ts`, `test/__tests__/jsonl_warning.test.ts`, `README.md`。
+- 追加テスト: `append 失敗は stderr へ認証情報を含まない警告を同一インスタンスで 1 回だけ出す`、`enqueue 失敗は stderr へ認証情報を含まない警告を同一インスタンスで 1 回だけ出す`。
+
+### fix6 検証結果
+
+- テスト件数: **135 → 146**（12 → 13 suites、純増 11 tests）。`npm test -- --runInBand`: 13 suites / 146 tests PASS。
+- `npm run typecheck`: PASS。
+- `npm run build`: PASS。
+- `git diff --check`: PASS（改行コード変換予告のみ、whitespace error なし）。
+- ネットワーク通信なし。`../kintone-sql-tools`、`~/.ksql-flow-dev/`、`docs/internal/ksql_flow_design_v2_9.md` は変更していない。

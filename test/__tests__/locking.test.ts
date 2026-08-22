@@ -166,6 +166,10 @@ describe("排他ロック（受入基準 3）", () => {
     expect(logs[0].status).toBe("TIMEOUT");
     expect(logs[0].job_key).toBe("");
     expect(logs[0].log_detail).toContain("unlock による明示解除");
+    const output = world.output.join("\n");
+    expect(output).toContain("同一プロファイル \"test\" の全 RUNNING");
+    expect(output).toContain("解除対象 RUNNING: 1 件");
+    expect(output).toContain("jobKey=test:hung_job");
   });
 });
 

@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 22]
+        node-version: [18, 20, 22]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,3 +28,33 @@ jobs:
         run: npm ls @rex0220/kintone-sql-tools@^3.71.0
       - run: npm test
       - run: npm run build
+
+  pack:
+    name: npm pack / installed CLI smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm run build
+      - name: Pack and inspect tarball
+        shell: bash
+        run: |
+          tarball="$(npm pack --silent)"
+          tar -tf "$tarball" | tee tarball-files.txt
+          grep -Fx 'package/dist/cli.js' tarball-files.txt
+          grep -Fx 'package/schema/ksql.config.schema.json' tarball-files.txt
+          grep -Fx 'package/template/ksql-flow-log-template1.zip' tarball-files.txt
+          grep -Fx 'package/README.md' tarball-files.txt
+          grep -Fx 'package/LICENSE' tarball-files.txt
+          if grep -Eq '^package/(src|test)/' tarball-files.txt; then
+            echo 'Unexpected source/test files in npm tarball' >&2
+            exit 1
+          fi
+          smoke_dir="$(mktemp -d)"
+          npm install --prefix "$smoke_dir" "./$tarball"
+          "$smoke_dir/node_modules/.bin/ksql-flow" --help

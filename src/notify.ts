@@ -81,7 +81,7 @@ export async function notifyFailure(
   }
 }
 
-/** heartbeat（設計書 7.3）。Exit 0（SUCCESS / NO_DATA）の完了時に送る */
+/** heartbeat（仕様書 7.3）。success は Exit 0、always は失敗を含む完了時に送る。 */
 export async function notifyHeartbeat(
   profile: ResolvedProfile,
   masker: SecretMasker,
@@ -90,6 +90,7 @@ export async function notifyHeartbeat(
 ): Promise<void> {
   const heartbeat = profile.notifications.heartbeat;
   if (heartbeat === undefined) return;
+  if (heartbeat.on === "success" && payload.status !== "SUCCESS" && payload.status !== "NO_DATA") return;
   try {
     await post(heartbeat.url, {
       source: "ksql-flow",

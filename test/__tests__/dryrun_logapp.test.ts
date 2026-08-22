@@ -44,7 +44,7 @@ describe("--dry-run（fix4: v3.71.0 差分プレビュー）", () => {
     expect(text).toContain("変更サンプル");
     expect(customerRecords(world)).toHaveLength(0);
     expect(mutationRequests(world)).toHaveLength(0);
-    expect(fs.existsSync(`${world.dir}/.ksql/state.json`)).toBe(false);
+    expect(fs.existsSync(`${world.dir}/.ksql/state-test.json`)).toBe(false);
     const jsonl = fs.readdirSync(world.profile.logging.localDir).filter((name) => name.endsWith(".jsonl"));
     expect(jsonl).toHaveLength(1);
     expect(fs.readFileSync(`${world.profile.logging.localDir}/${jsonl[0]}`, "utf8")).toContain("dry_run_finish");
@@ -144,7 +144,8 @@ describe("--dry-run（fix4: v3.71.0 差分プレビュー）", () => {
     });
     expect(code).toBe(EXIT.OK);
     expect(world.output).toHaveLength(1);
-    const report = JSON.parse(world.output[0]) as { kind: string; sampleLimit: number; samples: unknown[] };
+    const report = JSON.parse(world.output[0]) as { formatVersion: number; kind: string; sampleLimit: number; samples: unknown[] };
+    expect(report.formatVersion).toBe(1);
     expect(report.kind).toBe("DRY_RUN");
     expect(report.sampleLimit).toBe(2);
     expect(report.samples).toHaveLength(2);
@@ -215,7 +216,8 @@ UPDATE LAPP_顧客マスタ SET 当月売上実績 = 95 WHERE 顧客コード = 
     });
     expect(jsonCode).toBe(EXIT.OK);
     expect(world.output).toHaveLength(1);
-    const batch = JSON.parse(world.output[0]) as { kind: string; warning: string; jobs: unknown[] };
+    const batch = JSON.parse(world.output[0]) as { formatVersion: number; kind: string; warning: string; jobs: unknown[] };
+    expect(batch.formatVersion).toBe(1);
     expect(batch.kind).toBe("DRY_RUN_BATCH");
     expect(batch.warning).toContain("データ依存は再現されません");
     expect(batch.jobs).toHaveLength(2);
@@ -275,6 +277,21 @@ describe("init-logapp / --check-logapp（設計書 付録 B）", () => {
     const text = world.output.join("\n");
     expect(text).toContain("重複を禁止");
     expect(text).toContain("last_written_key");
+  });
+
+  test("--check-logapp: record_type / status の不足・過剰選択肢を NG 表示する", async () => {
+    world = buildWorld({});
+    world.mock.app(LOG_APP).def.fields.record_type.options = ["BATCH"];
+    world.mock.app(LOG_APP).def.fields.status.options = [
+      "SUCCESS", "NO_DATA", "FAILED", "ABORTED", "SKIPPED", "RUNNING", "TIMEOUT", "UNKNOWN",
+    ];
+    const code = await checkLogAppCommand(world.profile, {
+      baseFetch: world.mock.fetch,
+      out: world.out,
+    });
+    expect(code).toBe(EXIT.VALIDATION);
+    expect(world.output.join("\n")).toContain("不足: JOB");
+    expect(world.output.join("\n")).toContain("過剰: UNKNOWN");
   });
 });
 

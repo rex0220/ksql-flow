@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rex0220/ksql-flow/blob/v0.1.0/schema/ksql.config.schema.json",
+  "title": "kSQL Flow configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["profiles"],
+  "properties": {
+    "defaultProfile": { "type": "string", "minLength": 1 },
+    "profiles": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/profile" }
+    },
+    "limits": { "$ref": "#/$defs/limits" },
+    "retry": { "$ref": "#/$defs/retry" },
+    "notifications": { "$ref": "#/$defs/notifications" },
+    "logging": { "$ref": "#/$defs/logging" }
+  },
+  "$defs": {
+    "envString": { "type": "string", "minLength": 1 },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "extends": { "type": "string", "minLength": 1 },
+        "baseUrl": { "$ref": "#/$defs/envString" },
+        "timezone": { "type": "string", "minLength": 1 },
+        "auth": { "$ref": "#/$defs/auth" },
+        "basicAuth": { "$ref": "#/$defs/basicAuth" },
+        "clientCert": { "$ref": "#/$defs/clientCert" },
+        "proxy": { "type": ["string", "null"] },
+        "guestSpaceId": { "type": ["integer", "null"], "minimum": 1 },
+        "apps": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/app" }
+        },
+        "logApp": { "type": "string", "minLength": 1 },
+        "limits": { "$ref": "#/$defs/limits" },
+        "retry": { "$ref": "#/$defs/retry" },
+        "notifications": { "$ref": "#/$defs/notifications" },
+        "logging": { "$ref": "#/$defs/logging" },
+        "httpTimeoutMs": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["apiToken", "password", "basic"] },
+        "username": { "$ref": "#/$defs/envString" },
+        "password": { "$ref": "#/$defs/envString" },
+        "basicUsername": { "$ref": "#/$defs/envString" },
+        "basicPassword": { "$ref": "#/$defs/envString" }
+      }
+    },
+    "basicAuth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["username", "password"],
+      "properties": {
+        "username": { "$ref": "#/$defs/envString" },
+        "password": { "$ref": "#/$defs/envString" }
+      }
+    },
+    "clientCert": {
+      "description": "Reserved; v0.1 rejects this setting with ConfigError.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pfxPath"],
+      "properties": {
+        "pfxPath": { "type": "string", "minLength": 1 },
+        "password": { "$ref": "#/$defs/envString" }
+      }
+    },
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 1 },
+        "tokens": {
+          "type": "array",
+          "maxItems": 9,
+          "items": { "$ref": "#/$defs/envString" }
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxApiCalls": { "type": ["integer", "null"], "minimum": 1 },
+        "maxTempRows": { "type": ["integer", "null"], "minimum": 1 },
+        "batchTimeoutSec": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxAttempts": { "type": "integer", "minimum": 0 },
+        "initialDelayMs": { "type": "number", "minimum": 0 },
+        "maxDelayMs": { "type": "number", "minimum": 0 },
+        "respectRetryAfter": { "type": "boolean" }
+      }
+    },
+    "notifications": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "onFailure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["webhook"],
+          "properties": { "webhook": { "$ref": "#/$defs/envString" } }
+        },
+        "heartbeat": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["url"],
+          "properties": {
+            "url": { "$ref": "#/$defs/envString" },
+            "on": { "enum": ["success", "always"] }
+          }
+        }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "localDir": { "type": "string", "minLength": 1 },
+        "maskFields": { "type": "array", "items": { "type": "string" } },
+        "stripLiterals": { "type": "boolean" }
+      }
+    }
+  }
+}

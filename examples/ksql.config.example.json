@@ -1,0 +1,46 @@
+{
+  "defaultProfile": "prod",
+  "profiles": {
+    "prod": {
+      "baseUrl": "https://example.cybozu.com",
+      "timezone": "Asia/Tokyo",
+      "auth": { "type": "apiToken" },
+      "apps": {
+        "受注":       { "id": 100, "tokens": ["env:KSQL_TOKEN_ORDERS"] },
+        "顧客マスタ": { "id": 200, "tokens": ["env:KSQL_TOKEN_CUST_READ", "env:KSQL_TOKEN_CUST_WRITE"] },
+        "実行ログ":   { "id": 999, "tokens": ["env:KSQL_TOKEN_LOGS"] }
+      },
+      "logApp": "実行ログ"
+    },
+    "stg": {
+      "extends": "prod",
+      "baseUrl": "https://example-stg.cybozu.com",
+      "apps": {
+        "受注":       { "id": 310, "tokens": ["env:KSQL_STG_TOKEN_ORDERS"] },
+        "顧客マスタ": { "id": 311, "tokens": ["env:KSQL_STG_TOKEN_CUST"] },
+        "実行ログ":   { "id": 312, "tokens": ["env:KSQL_STG_TOKEN_LOGS"] }
+      },
+      "logApp": "実行ログ"
+    }
+  },
+  "limits": {
+    "maxApiCalls": 5000,
+    "maxTempRows": 200000,
+    "batchTimeoutSec": 3600
+  },
+  "retry": {
+    "maxAttempts": 5,
+    "initialDelayMs": 1000,
+    "maxDelayMs": 60000,
+    "respectRetryAfter": true
+  },
+  "notifications": {
+    "onFailure": { "webhook": "env:SLACK_ALERT_WEBHOOK_URL" },
+    "heartbeat": { "url": "env:DEADMAN_SWITCH_URL", "on": "success" }
+  },
+  "logging": {
+    "localDir": ".ksql/logs",
+    "maskFields": [],
+    "stripLiterals": true
+  }
+}

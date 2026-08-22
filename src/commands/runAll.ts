@@ -11,6 +11,7 @@ import { StateFile, StateStore } from "../state";
 import { EXIT, ExitCode, JobOutcome, JobStatus } from "../types";
 import { printOutcome } from "./run";
 import { dryRunJob, DryRunReport } from "./dryrun";
+import { printRunningTargets } from "./unlock";
 import { version as engineVersion } from "@rex0220/kintone-sql-tools/flow";
 
 export interface RunAllOptions {
@@ -90,7 +91,7 @@ export async function runAllCommand(
   if (options.resume === true) {
     const resumed = await resolveResume(env, profile, jobs, options);
     if (resumed === null) {
-      out("エラー: --resume に必要な直近バッチの実行記録が見つかりません（ログアプリ・state.json とも）");
+      out("エラー: --resume に必要な直近バッチの実行記録が見つかりません（ログアプリ・profile 別 state とも）");
       return EXIT.VALIDATION;
     }
     selection = resumed.selection;
@@ -141,7 +142,7 @@ export async function runAllCommand(
       worst = worseDryRunExit(worst, code);
     }
     if (options.json === true) {
-      out(JSON.stringify({ kind: "DRY_RUN_BATCH", warning, exitCode: worst, jobs: reports }));
+      out(JSON.stringify({ formatVersion: 1, kind: "DRY_RUN_BATCH", warning, exitCode: worst, jobs: reports }));
     }
     return worst;
   }
@@ -156,7 +157,9 @@ export async function runAllCommand(
     localLock.forceRelease();
     if (env.logApp !== null) {
       try {
-        for (const record of await env.logApp.listRunning(profile.name)) {
+        const running = await env.logApp.listRunning(profile.name);
+        printRunningTargets(out, profile.name, running, "--force-unlock");
+        for (const record of running) {
           await env.logApp.recoverStale(record, "--force-unlock による明示解除");
           out(`  RUNNING レコードを解除しました: ${record.jobKey}`);
         }
@@ -222,7 +225,7 @@ export async function runAllCommand(
     });
 
     // --- 実行ループ --------------------------------------------------------
-    const state = new StateStore(process.cwd(), profile.name);
+    const state = new StateStore(process.cwd(), profile.name, out);
     const stateFile: StateFile = {
       schemaVersion: 1,
       profile: profile.name,
@@ -369,14 +372,7 @@ export async function runAllCommand(
 
     out(`[RESULT] ${batchStatus} (exit ${exitCode}) — ${summaryLine(outcomes)}`);
 
-    if (exitCode === EXIT.OK) {
-      await notifyHeartbeat(
-        profile,
-        env.masker,
-        { batchId: env.batchId, status: batchStatus },
-        { fetchImpl: options.notifyFetch, out }
-      );
-    } else {
+    if (exitCode !== EXIT.OK) {
       await notifyFailure(
         profile,
         env.masker,
@@ -394,6 +390,12 @@ export async function runAllCommand(
         { fetchImpl: options.notifyFetch, out }
       );
     }
+    await notifyHeartbeat(
+      profile,
+      env.masker,
+      { batchId: env.batchId, status: batchStatus },
+      { fetchImpl: options.notifyFetch, out }
+    );
     return exitCode;
   } catch (error) {
     if (error instanceof LockUnavailableError) {
@@ -555,9 +557,9 @@ async function resolveResume(
     }
   }
 
-  const state = new StateStore(process.cwd(), profile.name).read();
+  const state = new StateStore(process.cwd(), profile.name, env.out).read();
   if (state === null) return null;
-  env.out("  警告: state.json（ローカルフォールバック）を resume の正として使用します");
+  env.out("  警告: profile 別 state（ローカルフォールバック）を resume の正として使用します");
   const selection = new Set<string>();
   const priorSuccess = new Set<string>();
   for (const [name, jobState] of Object.entries(state.jobs)) {

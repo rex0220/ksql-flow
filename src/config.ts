@@ -146,6 +146,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): ResolvedProfile {
   if (typeof raw !== "object" || raw === null || typeof raw.profiles !== "object" || raw.profiles === null) {
     throw new ConfigError(`設定ファイルに profiles がありません (${configPath})`);
   }
+  validateKnownConfigKeys(raw);
   const profileName = opts.profile
     ?? (typeof raw.defaultProfile === "string" ? raw.defaultProfile : undefined);
   if (!profileName) {
@@ -153,6 +154,83 @@ export function loadConfig(opts: LoadConfigOptions = {}): ResolvedProfile {
   }
   const merged = mergeProfileChain(raw, profileName);
   return resolveProfile(raw, merged, profileName);
+}
+
+function validateKnownConfigKeys(raw: RawConfig): void {
+  assertKnownKeys(raw, ["defaultProfile", "profiles", "limits", "retry", "notifications", "logging"], "config");
+  validateLimitsKeys(raw.limits, "limits");
+  validateRetryKeys(raw.retry, "retry");
+  validateNotificationsKeys(raw.notifications, "notifications");
+  validateLoggingKeys(raw.logging, "logging");
+  if (!isObject(raw.profiles) || Array.isArray(raw.profiles)) return;
+  for (const [name, value] of Object.entries(raw.profiles)) {
+    if (!isObject(value) || Array.isArray(value)) continue;
+    const ctx = `profiles.${name}`;
+    assertKnownKeys(value, [
+      "extends", "baseUrl", "timezone", "auth", "basicAuth", "clientCert", "proxy", "guestSpaceId",
+      "apps", "logApp", "limits", "retry", "notifications", "logging", "httpTimeoutMs",
+    ], ctx);
+    validateAuthKeys(value.auth, `${ctx}.auth`);
+    validateCredentialKeys(value.basicAuth, `${ctx}.basicAuth`);
+    validateCredentialKeys(value.clientCert, `${ctx}.clientCert`, ["pfxPath", "password"]);
+    validateAppsKeys(value.apps, `${ctx}.apps`);
+    validateLimitsKeys(value.limits, `${ctx}.limits`);
+    validateRetryKeys(value.retry, `${ctx}.retry`);
+    validateNotificationsKeys(value.notifications, `${ctx}.notifications`);
+    validateLoggingKeys(value.logging, `${ctx}.logging`);
+  }
+}
+
+function validateAuthKeys(value: unknown, ctx: string): void {
+  assertKnownKeys(value, ["type", "username", "password", "basicUsername", "basicPassword"], ctx);
+}
+
+function validateCredentialKeys(
+  value: unknown,
+  ctx: string,
+  allowed: readonly string[] = ["username", "password"]
+): void {
+  assertKnownKeys(value, allowed, ctx);
+}
+
+function validateAppsKeys(value: unknown, ctx: string): void {
+  if (!isObject(value) || Array.isArray(value)) return;
+  for (const [name, app] of Object.entries(value)) {
+    assertKnownKeys(app, ["id", "tokens"], `${ctx}.${name}`);
+  }
+}
+
+function validateLimitsKeys(value: unknown, ctx: string): void {
+  assertKnownKeys(value, ["maxApiCalls", "maxTempRows", "batchTimeoutSec"], ctx);
+}
+
+function validateRetryKeys(value: unknown, ctx: string): void {
+  assertKnownKeys(value, ["maxAttempts", "initialDelayMs", "maxDelayMs", "respectRetryAfter"], ctx);
+}
+
+function validateNotificationsKeys(value: unknown, ctx: string): void {
+  assertKnownKeys(value, ["onFailure", "heartbeat"], ctx);
+  if (!isObject(value) || Array.isArray(value)) return;
+  assertKnownKeys(value.onFailure, ["webhook"], `${ctx}.onFailure`);
+  assertKnownKeys(value.heartbeat, ["url", "on"], `${ctx}.heartbeat`);
+}
+
+function validateLoggingKeys(value: unknown, ctx: string): void {
+  assertKnownKeys(value, ["localDir", "maskFields", "stripLiterals"], ctx);
+}
+
+function assertKnownKeys(value: unknown, allowed: readonly string[], ctx: string): void {
+  if (!isObject(value) || Array.isArray(value)) return;
+  const allowedSet = new Set(allowed);
+  for (const key of Object.keys(value)) {
+    if (!allowedSet.has(key)) {
+      throw new ConfigError(`${ctx}.${key}: 未知の設定キーです`);
+    }
+  }
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 /** extends チェーンをたどってマージする。apps / logApp は継承しない（設計書 9 章の事故防止規定）。 */

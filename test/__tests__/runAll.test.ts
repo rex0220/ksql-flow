@@ -289,6 +289,37 @@ describe("--resume（受入基準 4: 失敗ジョブのみを元の as-of で再
     expect(payload?.jobs?.map((job) => job.script)).toEqual(["01_a.sql"]);
   });
 
+  test("run-all の heartbeat on: always は ABORTED 時も onFailure と併送する", async () => {
+    world = buildWorld({ orders: ORDERS });
+    world.profile.notifications = {
+      onFailure: { webhook: "https://hooks.example.com/failure" },
+      heartbeat: { url: "https://hooks.example.com/heartbeat", on: "always" },
+    };
+    writeJob(world, "01_a.sql", JOB_FAIL);
+    const calls: Array<{ url: string; body: { status?: string } }> = [];
+    const notifyFetch: typeof fetch = async (input, init) => {
+      calls.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body)) as { status?: string },
+      });
+      return new Response("{}", { status: 200 });
+    };
+
+    const code = await runAllCommand(world.profile, world.jobsDir, {
+      asOf: AS_OF,
+      baseFetch: world.mock.fetch,
+      notifyFetch,
+      out: world.out,
+    });
+
+    expect(code).toBe(EXIT.ABORTED);
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://hooks.example.com/failure",
+      "https://hooks.example.com/heartbeat",
+    ]);
+    expect(calls[1].body.status).toBe("ABORTED");
+  });
+
   test("直近 BATCH に JOB レコードが 0 件なら全ジョブを未着手として再実行する", async () => {
     world = buildWorld({
       orders: ORDERS,
@@ -357,7 +388,7 @@ describe("--resume（受入基準 4: 失敗ジョブのみを元の as-of で再
     }
   });
 
-  test("ログアプリ到達不能時は state.json フォールバック（警告付き）", async () => {
+  test("ログアプリ到達不能時は profile 別 state フォールバック（警告付き）", async () => {
     world = buildWorld({ orders: ORDERS });
     writeJob(world, "01_a.sql", JOB_FAIL);
     const originalAsOf = "2026-08-01T00:00:00+09:00";
@@ -368,7 +399,7 @@ describe("--resume（受入基準 4: 失敗ジョブのみを元の as-of で再
     });
     expect(first).toBe(EXIT.ABORTED);
 
-    // 2 回目はログアプリを落として resume → state.json フォールバック + fail-closed 到達前に
+    // 2 回目はログアプリを落として resume → profile 別 state フォールバック + fail-closed 到達前に
     // ロック確立不能になるため --lock local-only を併用
     writeJob(world, "01_a.sql", JOB_A);
     const original = world.mock.fetch;
@@ -388,7 +419,7 @@ describe("--resume（受入基準 4: 失敗ジョブのみを元の as-of で再
     });
     expect(second).toBe(EXIT.OK);
     const text = world.output.join("\n");
-    expect(text).toContain("state.json");
+    expect(text).toContain("profile 別 state");
     expect(text).toContain("as-of を引き継ぎます");
   });
 });

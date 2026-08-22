@@ -83,8 +83,11 @@ export function buildWorld(options: {
       name: "実行ログ",
       expectedToken: "token-logs",
       fields: {
-        record_type: { type: "DROP_DOWN" },
-        status: { type: "DROP_DOWN" },
+        record_type: { type: "DROP_DOWN", options: ["BATCH", "JOB"] },
+        status: {
+          type: "DROP_DOWN",
+          options: ["SUCCESS", "NO_DATA", "FAILED", "ABORTED", "SKIPPED", "RUNNING", "TIMEOUT"],
+        },
         batch_id: { type: "SINGLE_LINE_TEXT" },
         parent_batch_id: { type: "SINGLE_LINE_TEXT" },
         job_key: { type: "SINGLE_LINE_TEXT", unique: true },

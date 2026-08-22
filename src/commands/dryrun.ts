@@ -31,6 +31,7 @@ export interface DryRunSample {
 }
 
 export interface DryRunReport {
+  formatVersion: 1;
   kind: "DRY_RUN";
   job: string;
   profile: string;
@@ -213,6 +214,7 @@ export async function dryRunJob(
   const totalApiCalls = env.http.snapshot() - apiBefore;
   if (failure !== undefined) failure = env.masker.mask(failure);
   const report: DryRunReport = {
+    formatVersion: 1,
     kind: "DRY_RUN",
     job: job.fileName,
     profile: env.profile.name,

@@ -7,6 +7,7 @@ import { notifyFailure, notifyHeartbeat } from "../notify";
 import { createRunnerEnv, effectiveTimeoutMs, parseAsOf } from "../runner";
 import { EXIT, ExitCode, JobOutcome } from "../types";
 import { dryRunJob } from "./dryrun";
+import { printRunningTargets } from "./unlock";
 
 export interface RunOptions {
   asOf?: string;
@@ -69,7 +70,9 @@ export async function runCommand(
     if (removed) out("  前回のローカルロックを解除しました (--force-unlock)");
     if (env.logApp !== null) {
       try {
-        for (const record of await env.logApp.listRunning(profile.name)) {
+        const running = await env.logApp.listRunning(profile.name);
+        printRunningTargets(out, profile.name, running, "--force-unlock");
+        for (const record of running) {
           await env.logApp.recoverStale(record, "--force-unlock による明示解除");
           out(`  RUNNING レコードを解除しました: ${record.jobKey}`);
         }
@@ -127,7 +130,7 @@ export async function runCommand(
 
   printOutcome(out, outcome);
 
-  // 通知（設計書 7.3。NO_DATA は通知しない = 受入基準 2）
+  // 通知（仕様書 7.3）。失敗時は onFailure、heartbeat: always なら両方を送る。
   if (outcome.status === "FAILED" || outcome.status === "ABORTED" || outcome.status === "TIMEOUT") {
     await notifyFailure(
       profile,
@@ -142,14 +145,13 @@ export async function runCommand(
       },
       { fetchImpl: options.notifyFetch, out }
     );
-  } else {
-    await notifyHeartbeat(
-      profile,
-      env.masker,
-      { batchId: env.batchId, status: outcome.status },
-      { fetchImpl: options.notifyFetch, out }
-    );
   }
+  await notifyHeartbeat(
+    profile,
+    env.masker,
+    { batchId: env.batchId, status: outcome.status },
+    { fetchImpl: options.notifyFetch, out }
+  );
 
   return outcome.exitCode;
 }

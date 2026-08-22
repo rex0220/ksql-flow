@@ -10,7 +10,7 @@
 
 共通の前提:
 
-* 仕様の正は `docs/ksql_flow_design_v2_8.md`。エンジン側の事実関係は `docs/internal/kSQLエンジンからの申し送り-20260822-v3710.md`。
+* 仕様の正は `docs/ksql_flow_spec.md`（リリース版。開発経緯付きの設計書は `docs/internal/ksql_flow_design_v2_9.md`）。エンジン側の事実関係は `docs/internal/kSQLエンジンからの申し送り-20260822-v3710.md`。
 * エンジンリポジトリ `../kintone-sql-tools` は**変更禁止**（依頼は文書で起票）。依存は公式 API `@rex0220/kintone-sql-tools/flow` のみ。
 * MIT ライセンス・テレメトリなし・外部通信は設定された kintone と Webhook のみ。認証情報をログに出さない。
 * 役割間の意見の相違は裁定者 Takashi に上げ、結果を `docs/internal/reviews/decisions.md` に記録する。裁定済み事項は再提案しない。

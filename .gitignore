@@ -1,26 +1,23 @@
-# dependencies / build
+# ビルド生成物・依存
 node_modules/
 dist/
+coverage/
 *.tsbuildinfo
+*.tgz
 
 # ランナーの実行時生成物（ロック・state・ローカル JSONL ログ）
 .ksql/
 
-# ローカル運用ファイル（トークン等の env: 参照を含むため念のため除外。例は examples/ を参照）
+# ローカル設定・秘密情報（実値はリポジトリ外 %USERPROFILE%\.ksql-flow-dev\ に置く。設定例は examples/ を参照）
 ksql.config.json
 ksql.config.local.json
-.env
-.env.*
+.env*
+*.env
 .npmrc
-
-# test / coverage
-coverage/
-
-# OS / editor
-.DS_Store
-Thumbs.db
-
-# 実機検証の接続情報（実ドメイン・API トークン。リポジトリ外 %USERPROFILE%\.ksql-flow-dev\ が正位置）
 docs/test-app/
 api.txt
-*.env
+
+# OS / エディタ
+.DS_Store
+Thumbs.db
+.vscode/

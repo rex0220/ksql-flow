@@ -8,10 +8,12 @@ import { SecretMasker } from "./mask";
  */
 export class JsonlLogger {
   private readonly filePath: string;
+  private writeWarningShown = false;
 
   constructor(
     readonly localDir: string,
     readonly batchId: string,
+    readonly profile: string,
     private readonly masker: SecretMasker
   ) {
     fs.mkdirSync(localDir, { recursive: true });
@@ -19,11 +21,21 @@ export class JsonlLogger {
   }
 
   append(event: string, payload: Record<string, unknown>): void {
-    const line = JSON.stringify({ ts: new Date().toISOString(), event, ...payload });
+    const line = JSON.stringify({
+      ...payload,
+      v: 1,
+      ts: new Date().toISOString(),
+      event,
+      batchId: this.batchId,
+      profile: this.profile,
+    });
     try {
       fs.appendFileSync(this.filePath, this.masker.mask(line) + "\n");
     } catch {
-      // ローカルログの失敗で実行自体は止めない
+      if (!this.writeWarningShown) {
+        console.error("警告: ローカル JSONL ログへの書き込みに失敗しました。実行を継続します");
+        this.writeWarningShown = true;
+      }
     }
   }
 }
@@ -43,6 +55,7 @@ export interface PendingOp {
 export class PendingQueue {
   private readonly dir: string;
   private seq = 0;
+  private writeWarningShown = false;
 
   constructor(localDir: string, private readonly masker: SecretMasker) {
     this.dir = path.join(localDir, "pending");
@@ -54,7 +67,10 @@ export class PendingQueue {
       const name = `${Date.now()}-${process.pid}-${this.seq++}.json`;
       fs.writeFileSync(path.join(this.dir, name), this.masker.mask(JSON.stringify(op)));
     } catch {
-      // 再送キューへの書き込み失敗は握りつぶす（JSONL 側には記録済み）
+      if (!this.writeWarningShown) {
+        console.error("警告: ログ再送キューへの書き込みに失敗しました。実行を継続します");
+        this.writeWarningShown = true;
+      }
     }
   }
 

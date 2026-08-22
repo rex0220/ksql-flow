@@ -48,6 +48,27 @@ describe("loadConfig", () => {
     expect(profile.limits.batchTimeoutSec).toBe(3600);
   });
 
+  test.each([
+    ["top-level", (config: any) => { config.unexpected = true; }],
+    ["profile", (config: any) => { config.profiles.prod.unexpected = true; }],
+    ["apps entry", (config: any) => { config.profiles.prod.apps.受注.unexpected = true; }],
+    ["limits", (config: any) => { config.limits = { maxApiCalls: 10, unexpected: true }; }],
+    ["retry", (config: any) => { config.retry = { maxAttempts: 2, unexpected: true }; }],
+    ["notifications", (config: any) => { config.notifications = { onFailure: { webhook: "x", unexpected: true } }; }],
+    ["logging", (config: any) => { config.logging = { stripLiterals: false, unexpected: true }; }],
+    ["auth", (config: any) => { config.profiles.prod.auth = { type: "apiToken", unexpected: true }; }],
+  ])("未知キーを ConfigError にする: %s", (_layer, mutate) => {
+    const config = structuredClone(BASE) as any;
+    mutate(config);
+    expect(() => loadConfig({ configPath: writeConfig(config) })).toThrow(/未知の設定キー/);
+  });
+
+  test("stripLiterals の typo を拒否する", () => {
+    const config = structuredClone(BASE) as any;
+    config.profiles.prod.logging = { stripLiteral: true };
+    expect(() => loadConfig({ configPath: writeConfig(config) })).toThrow(/stripLiteral.*未知の設定キー/);
+  });
+
   test("設定ファイルが無ければ ConfigError", () => {
     expect(() => loadConfig({ configPath: path.join(dir, "nope.json") })).toThrow(ConfigError);
   });

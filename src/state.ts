@@ -31,15 +31,25 @@ export interface StateJob {
 export class StateStore {
   private readonly filePath: string;
 
-  constructor(baseDir: string, profile: string) {
+  constructor(
+    baseDir: string,
+    profile: string,
+    private readonly warn: (line: string) => void = (line) => console.warn(line)
+  ) {
     this.filePath = path.join(baseDir, ".ksql", `state-${profile.replace(/[^\w.-]/g, "_")}.json`);
   }
 
   read(): StateFile | null {
     try {
       const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf8")) as StateFile;
-      return parsed.schemaVersion === 1 ? parsed : null;
-    } catch {
+      if (parsed.schemaVersion !== 1) {
+        this.warn(`警告: state の schemaVersion ${String(parsed.schemaVersion)} は未対応です。state を使用せず続行します (${this.filePath})`);
+        return null;
+      }
+      return parsed;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      this.warn(`警告: state が破損しているか読み取れません。state を使用せず続行します (${this.filePath})`);
       return null;
     }
   }

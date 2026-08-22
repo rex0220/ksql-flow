@@ -100,6 +100,20 @@ export async function checkLogAppCommand(
       out(`  NG: フィールド "${code}" に「値の重複を禁止する」が設定されていません（分散ロックの前提）`);
       problems += 1;
     }
+    if (def.options !== undefined) {
+      const expectedOptions = [...def.options].sort();
+      const actualOptions = Object.keys(actual.optionOrder ?? {}).sort();
+      if (JSON.stringify(actualOptions) !== JSON.stringify(expectedOptions)) {
+        const missing = expectedOptions.filter((option) => !actualOptions.includes(option));
+        const extra = actualOptions.filter((option) => !expectedOptions.includes(option));
+        out(
+          `  NG: フィールド "${code}" の選択肢集合が不一致です` +
+          `${missing.length > 0 ? ` (不足: ${missing.join(", ")})` : ""}` +
+          `${extra.length > 0 ? ` (過剰: ${extra.join(", ")})` : ""}`
+        );
+        problems += 1;
+      }
+    }
   }
   if (problems === 0) {
     out(`OK: ログアプリ (ID ${appId}) は 8.2 のフィールド定義を満たしています`);

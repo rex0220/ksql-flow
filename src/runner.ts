@@ -28,7 +28,7 @@ export function createRunnerEnv(profile: ResolvedProfile, options: CreateEnvOpti
   const batchId = options.batchId ?? crypto.randomUUID();
   const masker = new SecretMasker(profile);
   const out = options.out ?? ((line: string) => console.log(masker.mask(line)));
-  const jsonl = new JsonlLogger(profile.logging.localDir, batchId, masker);
+  const jsonl = new JsonlLogger(profile.logging.localDir, batchId, profile.name, masker);
   const pending = new PendingQueue(profile.logging.localDir, masker);
 
   let maxApiCalls = profile.limits.maxApiCalls;

@@ -126,6 +126,8 @@ SELECT * FROM LAPP_受注 WHERE 顧客コード = 'C1';
 
     const statements = jsonlEvents(world, "statement");
     expect(statements).toHaveLength(2);
+    expect(statements[0]).toEqual(expect.objectContaining({ v: 1, batchId: expect.any(String), profile: "test" }));
+    expect(statements[0].ts).toEqual(expect.any(String));
     expect(statements.map((event) => event.readCount)).toEqual([3, 1]);
     expect(statements.every((event) => Number(event.apiCalls) > 0)).toBe(true);
     expect(Number(logRecords(world)[0].read_count)).toBe(4);
@@ -255,6 +257,54 @@ describe("run（受入基準 2: ABORTED / NO_DATA と通知）", () => {
     expect(notify.calls).toHaveLength(1);
     expect(notify.calls[0].url).toBe("https://hooks.example.com/alert");
     expect(JSON.stringify(notify.calls[0].body)).toContain("ABORTED");
+  });
+
+  test("heartbeat on: success は ABORTED 時に送らず onFailure のみ送る", async () => {
+    world = buildWorld({
+      orders: [{ 顧客コード: "C1", 金額: "-100", 受注日: "2026-08-05", ステータス: "受注完了" }],
+    });
+    world.profile.notifications = {
+      onFailure: { webhook: "https://hooks.example.com/failure" },
+      heartbeat: { url: "https://hooks.example.com/heartbeat", on: "success" },
+    };
+    const notify = notifyCapture();
+    const file = writeJob(world, "01_heartbeat_success.sql", SAMPLE_JOB);
+
+    const code = await runCommand(world.profile, file, {
+      asOf: AS_OF,
+      baseFetch: world.mock.fetch,
+      out: world.out,
+      notifyFetch: notify.fetch,
+    });
+
+    expect(code).toBe(EXIT.ABORTED);
+    expect(notify.calls.map((call) => call.url)).toEqual(["https://hooks.example.com/failure"]);
+  });
+
+  test("heartbeat on: always は ABORTED 時も onFailure と併送し status を含める", async () => {
+    world = buildWorld({
+      orders: [{ 顧客コード: "C1", 金額: "-100", 受注日: "2026-08-05", ステータス: "受注完了" }],
+    });
+    world.profile.notifications = {
+      onFailure: { webhook: "https://hooks.example.com/failure" },
+      heartbeat: { url: "https://hooks.example.com/heartbeat", on: "always" },
+    };
+    const notify = notifyCapture();
+    const file = writeJob(world, "01_heartbeat_always.sql", SAMPLE_JOB);
+
+    const code = await runCommand(world.profile, file, {
+      asOf: AS_OF,
+      baseFetch: world.mock.fetch,
+      out: world.out,
+      notifyFetch: notify.fetch,
+    });
+
+    expect(code).toBe(EXIT.ABORTED);
+    expect(notify.calls.map((call) => call.url)).toEqual([
+      "https://hooks.example.com/failure",
+      "https://hooks.example.com/heartbeat",
+    ]);
+    expect(notify.calls[1].body).toEqual(expect.objectContaining({ status: "ABORTED" }));
   });
 
   test("Webhook 非 2xx はマスク済み警告を出しジョブ結果には影響しない", async () => {
