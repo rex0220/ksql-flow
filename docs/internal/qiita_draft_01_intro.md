@@ -41,7 +41,7 @@ flowchart TD
     SQL -->|"処理内容を記述"| FLOW
     CONFIG --> FLOW
 
-    ENGINE -->|"REST API<br/>（読み取り・UPSERT / DML）"| APPS["kintone 業務アプリ<br/>（受注・顧客マスタ など）"]
+    ENGINE -->|"REST API<br/>（読み取り・UPSERT / DML）"| APPS["kintone 業務アプリ<br/>（案件管理・顧客管理 など）"]
     OPS -->|"実行記録 +<br/>job_key 分散ロック"| LOG["kintone ログアプリ<br/>（同梱テンプレートで作成）"]
     OPS -->|"失敗通知 / heartbeat"| HOOK["Webhook<br/>（Slack など）"]
     LOG -.->|"到達不能時は<br/>ローカル JSONL へ退避 → 次回再送"| JSONL[".ksql/logs/*.jsonl"]
@@ -49,39 +49,52 @@ flowchart TD
 
 登場人物は 4 つだけです。**kSQL Flow**（ランナー）が SQL と設定を読み、内包する **kSQL エンジン**が kintone の**業務アプリ**を読み書きします。もう 1 つの **ログアプリ**が影の主役で、実行記録・メトリクスの保存に加えて、重複禁止フィールドを使った**分散ロック**と `--resume` の**再開情報の正**を兼ねます。通信先はこの kintone とお好みの Webhook だけです。
 
+## アプリ構成: kintone の「営業支援（SFA）パック」を使います
+
+題材には、kintone に標準で用意されているサンプルアプリ **営業支援（SFA）パック**（顧客管理・案件管理・活動履歴）を使います。アプリストアから追加するだけで、この記事のジョブがそのまま試せます — 実はこの構成、本ツールの**リリース前実機検証で実際に使った構成そのもの**です。
+
+下ごしらえは集計の受け皿として **顧客管理アプリにフィールドを 3 つ追加**するだけ:
+
+| 追加フィールド | 型 |
+| --- | --- |
+| `当月案件件数` | 数値 |
+| `当月売上合計` | 数値 |
+| `最終集計日時` | 日時 |
+
+UPSERT のキーに使う顧客管理の `会社名` は、検証環境では「値の重複を禁止する」が有効でした（もし無効でも、後述の `validate` が KSQL1303 で検出して教えてくれます）。
+
 ## ジョブは SQL ファイル 1 本
 
-月次売上を顧客マスタへ反映するジョブの全文です。
+案件管理から「当月受注予定の案件」を顧客別に集計し、顧客管理へ反映するジョブの全文です。
 
 ```sql
--- @ksql name: monthly_sales_sync
+-- @ksql name: monthly_deal_summary
 -- @ksql timeout: 600
 -- @ksql dialect: 1
 
 -- Step 1: 業務異常があれば安全停止（アラート対象）
 ASSERT (
-  SELECT COUNT(*) FROM LAPP_受注
-  WHERE 受注日 >= @MONTH_START() AND 受注日 < @NEXT_MONTH_START()
-    AND 金額 < 0
+  SELECT COUNT(*) FROM LAPP_案件管理
+  WHERE 受注予定日 >= @MONTH_START() AND 受注予定日 < @NEXT_MONTH_START()
+    AND 売上 < 0
 ) = 0, '【異常中断】マイナスの売上データが存在するため処理を停止しました';
 
 -- Step 2: インメモリ一時テーブルへ集計（この間 kintone API は消費しない）
 CREATE TEMP TABLE temp_monthly_summary AS
-SELECT 顧客コード, COUNT(レコード番号) AS 受注件数, SUM(金額) AS 当月売上合計
-FROM LAPP_受注
-WHERE 受注日 >= @MONTH_START() AND 受注日 < @NEXT_MONTH_START()
-  AND ステータス = '受注完了'
-GROUP BY 顧客コード;
+SELECT 会社名, COUNT(案件No_) AS 案件件数, SUM(売上) AS 売上合計
+FROM LAPP_案件管理
+WHERE 受注予定日 >= @MONTH_START() AND 受注予定日 < @NEXT_MONTH_START()
+GROUP BY 会社名;
 
 -- Step 3: 対象 0 件は「正常な早期終了」（アラートを鳴らさない）
 EXIT SUCCESS IF (SELECT COUNT(*) FROM temp_monthly_summary) = 0,
-  '集計対象となる受注データが 0 件のためスキップ';
+  '集計対象となる案件データが 0 件のためスキップ';
 
 -- Step 4: キー指定 UPSERT（何度リランしても同じ結果になる = 冪等）
-UPSERT INTO LAPP_顧客マスタ (顧客コード, 当月受注件数, 当月売上実績, 最終集計日時)
-SELECT 顧客コード, 受注件数, 当月売上合計, @NOW()
+UPSERT INTO LAPP_顧客管理 (会社名, 当月案件件数, 当月売上合計, 最終集計日時)
+SELECT 会社名, 案件件数, 売上合計, @NOW()
 FROM temp_monthly_summary
-KEY (顧客コード);
+KEY (会社名);
 ```
 
 設計上こだわったポイントを 3 つだけ。
@@ -122,21 +135,21 @@ flowchart TD
 ## 実行は 3 段階: validate → dry-run → run
 
 ```bash
-ksql-flow validate -f jobs/monthly_sales_sync.sql --profile prod   # スキーマ依存の検証まで
-ksql-flow run -f jobs/monthly_sales_sync.sql --profile prod --dry-run
-ksql-flow run -f jobs/monthly_sales_sync.sql --profile prod
+ksql-flow validate -f jobs/monthly_deal_summary.sql --profile prod   # スキーマ依存の検証まで
+ksql-flow run -f jobs/monthly_deal_summary.sql --profile prod --dry-run
+ksql-flow run -f jobs/monthly_deal_summary.sql --profile prod
 ```
 
 `--dry-run` は「実行しないこと」ではなく「**実行したら何が起きるかを見せること**」が主眼です。書込ゼロで実レコードとの差分を出します。
 
 ```
-[DRY-RUN] monthly_sales_sync.sql (as-of: 2026-08-22T00:00:00.000Z)
+[DRY-RUN] monthly_deal_summary.sql (as-of: 2026-08-22T00:00:00.000Z)
   読み取り        : 276 件（API 5 回）
-  書き込み予定    : LAPP_顧客マスタ  INSERT 1 件 / UPDATE 1 件 / DELETE 0 件
+  書き込み予定    : LAPP_顧客管理  INSERT 1 件 / UPDATE 1 件 / DELETE 0 件
   実測 API 消費   : 6 回（読取 5 + preview 照合 1）
   変更サンプル（先頭 5 件）:
-    顧客コード=C0012  当月売上実績: 1,200,000 → 1,450,000
-    顧客コード=C0034  (新規) 当月売上実績: 380,000
+    会社名=山田商事  当月売上合計: 1,200,000 → 1,450,000
+    会社名=鈴木建設  (新規) 当月売上合計: 380,000
   => dry-run 完了（kintone 書き込み 0 件）
 ```
 
@@ -179,7 +192,7 @@ npm i -g @rex0220/ksql-flow   # Node.js 18+
 2. kintone のアプリ作成画面で「**テンプレートファイルを読み込む**」を選び、zip を直接指定して作成（システム管理への登録は不要です）
 3. 作成したアプリで API トークン（閲覧 + 追加 + 編集）を発行
 
-業務アプリ側（サンプルの受注・顧客マスタ）にも、閲覧 + 編集（INSERT するなら追加も）のトークンを用意しておきます。
+業務アプリ側（案件管理・顧客管理）にも、閲覧 + 編集（INSERT するなら追加も）のトークンを用意しておきます。
 
 ### 2. 設定ファイル（`ksql.config.json`）
 
@@ -194,9 +207,9 @@ npm i -g @rex0220/ksql-flow   # Node.js 18+
       "timezone": "Asia/Tokyo",
       "auth": { "type": "apiToken" },
       "apps": {
-        "受注":       { "id": 100, "tokens": ["env:KSQL_TOKEN_ORDERS"] },
-        "顧客マスタ": { "id": 200, "tokens": ["env:KSQL_TOKEN_CUSTOMERS"] },
-        "実行ログ":   { "id": 999, "tokens": ["env:KSQL_TOKEN_LOGS"] }
+        "案件管理": { "id": 100, "tokens": ["env:KSQL_TOKEN_DEALS"] },
+        "顧客管理": { "id": 200, "tokens": ["env:KSQL_TOKEN_CUSTOMERS"] },
+        "実行ログ": { "id": 999, "tokens": ["env:KSQL_TOKEN_LOGS"] }
       },
       "logApp": "実行ログ"
     }
@@ -204,21 +217,21 @@ npm i -g @rex0220/ksql-flow   # Node.js 18+
 }
 ```
 
-`apps` の論理名（`受注` など）が、ジョブ SQL の `LAPP_受注` に対応します。
+`apps` の論理名（`案件管理` など）が、ジョブ SQL の `LAPP_案件管理` に対応します。
 
 ### 3. トークンを環境変数に設定
 
 ```powershell
 # Windows (PowerShell)
-$env:KSQL_TOKEN_ORDERS = "<受注アプリのトークン>"
-$env:KSQL_TOKEN_CUSTOMERS = "<顧客マスタのトークン>"
+$env:KSQL_TOKEN_DEALS = "<案件管理のトークン>"
+$env:KSQL_TOKEN_CUSTOMERS = "<顧客管理のトークン>"
 $env:KSQL_TOKEN_LOGS = "<ログアプリのトークン>"
 ```
 
 ```bash
 # macOS / Linux (bash)
-export KSQL_TOKEN_ORDERS="<受注アプリのトークン>"
-export KSQL_TOKEN_CUSTOMERS="<顧客マスタのトークン>"
+export KSQL_TOKEN_DEALS="<案件管理のトークン>"
+export KSQL_TOKEN_CUSTOMERS="<顧客管理のトークン>"
 export KSQL_TOKEN_LOGS="<ログアプリのトークン>"
 ```
 
@@ -226,13 +239,13 @@ export KSQL_TOKEN_LOGS="<ログアプリのトークン>"
 
 ### 4. 実行
 
-冒頭のサンプルジョブを `jobs/monthly_sales_sync.sql` として保存したら、あとは前述の 3 段階です:
+冒頭のサンプルジョブを `jobs/monthly_deal_summary.sql` として保存したら、あとは前述の 3 段階です:
 
 ```bash
 ksql-flow validate --check-logapp --profile prod    # ログアプリの定義検査（初回のみ）
-ksql-flow validate -f jobs/monthly_sales_sync.sql --profile prod
-ksql-flow run -f jobs/monthly_sales_sync.sql --profile prod --dry-run
-ksql-flow run -f jobs/monthly_sales_sync.sql --profile prod
+ksql-flow validate -f jobs/monthly_deal_summary.sql --profile prod
+ksql-flow run -f jobs/monthly_deal_summary.sql --profile prod --dry-run
+ksql-flow run -f jobs/monthly_deal_summary.sql --profile prod
 ```
 
 `--check-logapp` はフィールド・型・重複禁止・選択肢まで機械検査するので、ログアプリ作成時に手作業のズレがあってもここで捕まります。実行が終わったら、kintone のログアプリを開いてみてください — 実行結果・処理件数・API 消費が 1 レコードとして残っているはずです。
