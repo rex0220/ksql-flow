@@ -308,7 +308,14 @@ AI の宣言どおり NO_DATA（exit 0）で着地しました。アラートは
   => SUCCESS (exit 0) 読取 5 件 / 書込 2 件 / API 9 回
 ```
 
-顧客管理に「KSQL-FLOW-TEST-山田商事: 2 件 / 150,000」「KSQL-FLOW-TEST-鈴木建設: 1 件 / 380,000」が書き込まれ、NO_DATA 経路だけでなく **ASSERT → 集計 → UPSERT の書込経路まで実機で一巡**しました。検証が済んだら片付けます:
+顧客管理に「KSQL-FLOW-TEST-山田商事: 2 件 / 150,000」「KSQL-FLOW-TEST-鈴木建設: 1 件 / 380,000」が書き込まれ、NO_DATA 経路だけでなく **ASSERT → 集計 → UPSERT の書込経路まで実機で一巡**しました。
+
+- 山田商事の集計例
+
+![2026-08-22_23h47_03.png](https://qiita-image-store.s3.ap-northeast-1.amazonaws.com/0/100572/6ec92f71-f5d1-4368-b8e0-507cf0c83f97.png)
+
+
+検証が済んだら片付けます:
 
 ```bash
 npm run job -- -f dev/cleanup_test_deals.sql --profile prod
@@ -391,9 +398,7 @@ npm run dry-run -- -f jobs/monthly_deal_summary.sql --profile prod
 npm run job -- -f jobs/monthly_deal_summary.sql --profile prod
 ```
 
-本実行後の顧客管理（KSQL-FLOW-TEST-山田商事）はこうなっています — dry-run の予告どおり、集計欄が 2 件 / 150,000 で埋まり、案件一覧には投入したテスト案件 2 件が並んでいます:
-
-![2026-08-22_23h47_03.png](https://qiita-image-store.s3.ap-northeast-1.amazonaws.com/0/100572/b106f817-208b-4d53-84fa-ba9dd8d069a9.png)
+本実行後の顧客管理が dry-run の予告どおり（集計欄が 2 件 / 150,000、案件一覧に投入したテスト案件 2 件）になっていることは、前掲のスクリーンショットのとおりです。
 
 ## ジョブは Git へ — AI の成果物を運用資産にする
 
