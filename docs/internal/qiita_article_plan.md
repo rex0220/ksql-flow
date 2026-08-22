@@ -33,6 +33,7 @@
 
 * **対象読者**: サーバーを持ちたくない・Git 管理と PR レビューで回したい層（最も Qiita 読者と相性が良い）
 * **骨子**: リポジトリ構成（jobs/ + config）→ Secrets 登録 → schedule workflow（examples/A-1 実物）→ PR ごとの `validate-all` → main マージ前の `run-all --dry-run --json` を PR コメントに貼る CI レシピ → 失敗時の `workflow_dispatch` + `--resume` 手動リラン
+* **schedule の制約を正直に書く**: ベストエフォートで実行時刻は保証されない（毎時 0 分は混雑で数十分遅延・高負荷時はドロップもあり得る・public リポジトリは 60 日更新なしで schedule 自動無効化）。対策 = cron の分を 0 以外にずらす / 遅延前提でジョブは as-of 基準に（kSQL Flow は開始時刻でなく as-of で集計するので遅延に強い、という接続）/ 時刻厳守の要件は ③cron・タスクスケジューラへ誘導
 * **独自ネタ**: dry-run --json を PR コメント化する actions スニペット（設計書 14 章の実装例）
 * **分量**: 4,000〜5,000 字
 

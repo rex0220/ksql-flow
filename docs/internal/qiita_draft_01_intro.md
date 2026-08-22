@@ -274,7 +274,7 @@ ksql-flow run -f jobs/monthly_deal_summary.sql --profile prod
 
 ### 定期実行はお好みの場所で
 
-これから環境を用意するなら **GitHub Actions**（小規模な定期実行なら無料枠で運用可能）か **VPS + cron / Docker**（最小クラスのプランで十分）が手軽です。すでに社内に Windows サーバーが動いているなら、**タスクスケジューラ**に載せれば追加コストゼロ — 失敗通知・実行記録・多重起動防止はランナー側が持つので、スケジューラは「決まった時刻に 1 コマンド叩く装置」で足ります。それぞれのセットアップ例はリポジトリの [examples/](https://github.com/rex0220/ksql-flow/tree/main/examples) にあります。
+これから環境を用意するなら **GitHub Actions**（小規模な定期実行なら無料枠で運用可能）か **VPS + cron / Docker**（最小クラスのプランで十分）が手軽です。なお Actions の schedule はベストエフォートで、混雑時間帯（特に毎時 0 分）は数分〜数十分遅れることがあります。夜間の集計バッチなら実用上問題ありませんが、**時刻厳守のジョブは cron やタスクスケジューラ向き**です。すでに社内に Windows サーバーが動いているなら、**タスクスケジューラ**に載せれば追加コストゼロ — 失敗通知・実行記録・多重起動防止はランナー側が持つので、スケジューラは「決まった時刻に 1 コマンド叩く装置」で足ります。それぞれのセットアップ例はリポジトリの [examples/](https://github.com/rex0220/ksql-flow/tree/main/examples) にあります。
 
 詳細な仕様（実行モデル・ロック・リラン・ログ設計）は[公開仕様書](https://github.com/rex0220/ksql-flow/blob/main/docs/ksql_flow_spec.md)にまとめてあります。ちなみに開発は実装 AI と レビュー AI の 2 体制で行い、レビュー往復や実機検証の記録も[そのまま公開](https://github.com/rex0220/ksql-flow/tree/main/docs/internal)しています（この話もいつか書くかもしれません）。
 
