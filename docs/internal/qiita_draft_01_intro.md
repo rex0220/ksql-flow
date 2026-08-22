@@ -260,12 +260,16 @@ ksql-flow validate -f jobs/monthly_deal_summary.sql --profile prod
 ksql-flow run -f jobs/monthly_deal_summary.sql --profile prod --dry-run
 ksql-flow run -f jobs/monthly_deal_summary.sql --profile prod
 ```
-
 `--check-logapp` はフィールド・型・重複禁止・選択肢まで機械検査するので、ログアプリ作成時に手作業のズレがあってもここで捕まります。実行が終わったら、kintone のログアプリを開いてみてください — 実行結果・処理件数・API 消費が 1 レコードとして残っているはずです。
+
+- VSCode ターミナルでの実行例
+
+![image.png](https://qiita-image-store.s3.ap-northeast-1.amazonaws.com/0/100572/b10320b2-6a12-4a2a-a400-3867fae54659.png)
+
 
 ### 定期実行はお好みの場所で
 
-**GitHub Actions**（サーバーレスで無料枠運用）/ **Windows タスクスケジューラ**（社内サーバーの本命）/ **cron / Docker**。それぞれのセットアップ例はリポジトリの [examples/](https://github.com/rex0220/ksql-flow/tree/main/examples) にあります。
+これから環境を用意するなら **GitHub Actions**（無料枠で完結）か **VPS + cron / Docker**（月 1,000 円前後の最小プランで十分）が手軽です。すでに社内に Windows サーバーが動いているなら、**タスクスケジューラ**に載せれば追加コストゼロ — 失敗通知・実行記録・多重起動防止はランナー側が持つので、スケジューラは「決まった時刻に 1 コマンド叩く装置」で足ります。それぞれのセットアップ例はリポジトリの [examples/](https://github.com/rex0220/ksql-flow/tree/main/examples) にあります。
 
 詳細な仕様（実行モデル・ロック・リラン・ログ設計）は[公開仕様書](https://github.com/rex0220/ksql-flow/blob/main/docs/ksql_flow_spec.md)にまとめてあります。ちなみに開発は実装 AI と レビュー AI の 2 体制で行い、レビュー往復や実機検証の記録も[そのまま公開](https://github.com/rex0220/ksql-flow/tree/main/docs/internal)しています（この話もいつか書くかもしれません）。
 
