@@ -99,7 +99,20 @@ cd my-ksql-jobs && npm install
 
 **6. VSCode で開いて Claude Code を起動** — 初回に kSQL MCP サーバーの使用可否を聞かれるので許可します（登録内容は `.mcp.json`）。
 
-**7. 疎通確認** — Claude Code に「`ksql_describe_app` で `LAPP_案件管理` のフィールド一覧を見せて」と指示し、フィールドコードと型が返ってくれば準備完了。ターミナル側は `npm run check-logapp -- --profile prod` でログアプリの定義検査まで通ります。
+**7. 疎通確認** — Claude Code に「`ksql_describe_app` で `LAPP_案件管理` のフィールド一覧を見せて」と指示し、フィールドコードと型が返ってくれば準備完了。
+
+![2026-08-22_21h35_19.png](https://qiita-image-store.s3.ap-northeast-1.amazonaws.com/0/100572/af06939d-7fc1-4e92-90c3-eafd01599e86.png)
+
+ターミナル側は `npm run check-logapp -- --profile prod` でログアプリの定義検査まで通ります。
+
+```
+my-ksql-jobs  [main ≡ +0 ~2 -1 !] > npm run check-logapp -- --profile prod
+
+> ksql-flow-template@1.0.0 check-logapp
+> node --env-file=.env node_modules/@rex0220/ksql-flow/dist/cli.js validate --check-logapp --profile prod
+
+OK: ログアプリ (ID 4249) は 8.2 のフィールド定義を満たしています
+```
 
 設計上のポイントを 1 つだけ — テンプレートでは **MCP 側の `logicalApps` の論理名を、ランナー config の `apps` と同じ名前にしてあります**。こうすると、AI が対話中に書く `LAPP_案件管理` という表記が、**MCP での下見クエリと kSQL Flow のジョブでそのまま同じ意味になります**。生成した SQL を書き換えずにジョブファイルへ移せる、というのがこの構成の要です。
 
@@ -136,39 +149,91 @@ MCP サーバーも npm scripts も Node の `--env-file=.env` 経由で動き�
 
 最後の 1 行が実務上いちばん効きます。エージェントはまず `ksql_describe_app` でフィールドコードと型を取得し（ここで `受注予定日` が DATE、`売上` が NUMBER だと確定します）、`ksql_query` で件数確認の下見 SELECT を流し、それからジョブを書きます。仕様が曖昧な構文は `ksql_docs` で言語リファレンスを引かせれば、構文の発明も防げます。
 
-こうして生成・検証を通ったジョブの全文がこちらです。第1話で紹介したものと同じジョブに到達します（テンプレートに同梱してあるサンプルジョブもこれです — 初回は生成させずにサンプルで流れを確認する、でも構いません）。
+こうして実際に生成されたジョブの全文がこちらです。第1話で紹介したジョブと同じ構成（ASSERT → 集計 → EXIT SUCCESS IF → キー指定 UPSERT）に到達しました。一時テーブル名や列の別名といった細部は生成のたびに揺れますが、そこは検証とレビューで守られる範囲です（テンプレート同梱のサンプルジョブは、この実走版に更新してあります — 初回は生成させずにサンプルで流れを確認する、でも構いません）。
 
 ```sql
 -- @ksql name: monthly_deal_summary
 -- @ksql timeout: 600
 -- @ksql dialect: 1
 
--- Step 1: 業務異常があれば安全停止（アラート対象）
+-- 当月受注予定（受注予定日が当月内）の案件を会社別に集計し、
+-- 顧客管理の 当月案件件数・当月売上合計・最終集計日時 を更新する。
+-- as-of 注入（/flow の asOf）で過去月のバックフィルも同一スクリプトで再現可能。
+
+-- 1) 業務異常ゲート: マイナス売上があれば何も書かずに中断（アラート対象）
 ASSERT (
   SELECT COUNT(*) FROM LAPP_案件管理
   WHERE 受注予定日 >= @MONTH_START() AND 受注予定日 < @NEXT_MONTH_START()
     AND 売上 < 0
-) = 0, '【異常中断】マイナスの売上データが存在するため処理を停止しました';
+) = 0, '【異常中断】当月受注予定の案件にマイナスの売上データが存在します';
 
--- Step 2: インメモリ一時テーブルへ集計（この間 kintone API は消費しない）
-CREATE TEMP TABLE temp_monthly_summary AS
-SELECT 会社名, COUNT(案件No_) AS 案件件数, SUM(売上) AS 売上合計
+-- 2) 会社別に集計（インメモリ・書込 API 消費なし）
+CREATE TEMP TABLE summary AS
+SELECT 会社名,
+       COUNT(*) AS 当月案件件数,
+       SUM(売上) AS 当月売上合計
 FROM LAPP_案件管理
 WHERE 受注予定日 >= @MONTH_START() AND 受注予定日 < @NEXT_MONTH_START()
 GROUP BY 会社名;
 
--- Step 3: 対象 0 件は「正常な早期終了」（アラートを鳴らさない）
-EXIT SUCCESS IF (SELECT COUNT(*) FROM temp_monthly_summary) = 0,
-  '集計対象となる案件データが 0 件のためスキップ';
+-- 3) 対象 0 件の月は正常スキップ（アラートなし）
+EXIT SUCCESS IF (SELECT COUNT(*) FROM summary) = 0,
+  '当月受注予定の案件が 0 件のためスキップ';
 
--- Step 4: キー指定 UPSERT（何度リランしても同じ結果になる = 冪等）
+-- 4) 冪等な書き込み: 会社名（重複禁止）をキーに UPSERT
 UPSERT INTO LAPP_顧客管理 (会社名, 当月案件件数, 当月売上合計, 最終集計日時)
-SELECT 会社名, 案件件数, 売上合計, @NOW()  -- @NOW() は実時計ではなくバッチ開始時の基準時刻（as-of）
-FROM temp_monthly_summary
+SELECT 会社名, 当月案件件数, 当月売上合計, @NOW()
+FROM summary
 KEY (会社名);
 ```
 
-これを `jobs/monthly_deal_summary.sql` に保存します。
+これを `jobs/monthly_deal_summary.sql` に保存し、検証まで自走させたときの **Claude Code の結果報告（実物・体裁のみ整形）** がこちらです。アプリ ID 4246/4247 は検証環境の実 ID です（記事中の config 例では 100/200 に置き換えています）。
+
+### Claude Code の結果報告（実物）
+
+**スキーマ実測（`ksql_describe_app`）**
+
+- 案件管理（4247・26 フィールド）: `受注予定日` DATE / `売上` NUMBER / `会社名` SINGLE_LINE_TEXT（ルックアップ）を確認
+- 顧客管理（4246・24 フィールド）: `会社名` が重複禁止 → UPSERT キーに採用
+
+**データ下見（`ksql_query`）**
+
+| 項目 | 値 |
+| --- | --- |
+| 案件管理 総件数 | 276 件 |
+| 受注予定日 入力あり | 16 件（最新 2025-12-26） |
+| 当月（2026-08）対象 | **0 件** |
+| マイナス売上 | 0 件 |
+| 当月対象の会社名空値 | 0 件 |
+
+**検証**
+
+| 段階 | 結果 |
+| --- | --- |
+| 一次検証 `ksql_validate` | OK（診断なし） |
+| 二次検証 `npm run validate -- -f jobs/monthly_deal_summary.sql --profile prod` | OK |
+| dry-run `npm run dry-run -- ... --profile prod` | 当月 0 件のため `EXIT SUCCESS`（NO_DATA・exit 0）。読取 API 4 回・書込 0 件 |
+| 書き込み経路の `VALIDATE ONLY`（2025-12 条件・書込 API 消費なし） | **失敗** — `DML target field 当月案件件数 does not exist` |
+
+**要対応（ブロッカー）** — 顧客管理アプリに書き込み先フィールドが存在しない。以下を**フィールドコードをこの名前どおり**に追加すること:
+
+| フィールドコード | タイプ |
+| --- | --- |
+| 当月案件件数 | 数値 |
+| 当月売上合計 | 数値 |
+| 最終集計日時 | 日時 |
+
+**既知の挙動（仕様どおりだが注意）** — 0 件月はスキップするため、**月が変わっても前月の集計値は残る**（ゼロクリアしない。当月に案件のない会社の値も前回のまま）。全顧客を毎回 0 リセットしたい場合は、マスタ起点 LEFT JOIN 方式への変更で対応可能。
+
+### 検査がブロッカーを見つけ、AI が「人間への要求」を出した
+
+実はこの時点で、検証環境の顧客管理には書き込み先の 3 フィールドをまだ追加していませんでした。注目してほしいのは**検出のされ方**です。
+
+- ランナーの validate は**通っています**（UPSERT の書込先「列」の存在は validate の守備範囲外 — キーの検査とは別）
+- 当月対象が 0 件のため、通常の dry-run も `EXIT SUCCESS IF` で正常終了し、**書込経路まで届きません**
+- そこで AI は、下見で見つけた過去月（2025-12）の条件で **`VALIDATE ONLY`**（1 件も書き込まずに全行検証するエンジン機能）を流して書込経路そのものを検査し、フィールド不存在を検出しました
+
+そして AI にできるのはここまでです。**kSQL はデータの読み書き専用で、アプリのフォーム変更はできません。** だから報告の結論は「要対応: この 3 フィールドを追加すること」という**人間への要求**になります。ジョブは書けるがアプリ構造には手が届かない — この分離も、閲覧のみトークンと同じく構成で決まっている境界です。
 
 ## 機械の検査が AI のミスを捕まえる（実例）
 
@@ -178,8 +243,9 @@ KEY (会社名);
 
 ```
 monthly_deal_summary.sql: OK (警告 2 件)
-  monthly_deal_summary.sql:6:1 warning KSQL1306 bare の時刻依存関数は kintone サーバー評価の
+  monthly_deal_summary.sql:10:1 warning KSQL1306 bare の時刻依存関数は kintone サーバー評価の
   ため as-of の対象外です。再現性が必要なら @ 付き関数を使用してください。
+  monthly_deal_summary.sql:17:1 warning KSQL1306 （同上）
 ```
 
 これは第1話の設計ポイント②（時刻はバッチ開始時に固定）を機械が守らせている、ということです。
@@ -188,7 +254,7 @@ monthly_deal_summary.sql: OK (警告 2 件)
 
 ```
 monthly_deal_summary.sql: NG (エラー 1 件 / 警告 0 件)
-  monthly_deal_summary.sql:24:1 error KSQL1302 UPSERT / MERGE のキー「顧客名」が
+  monthly_deal_summary.sql:30:1 error KSQL1302 UPSERT / MERGE のキー「顧客名」が
   APP200 のフォームに存在しません。重複禁止を設定した文字列（1行）または
   数値フィールドをキーにしてください。
 ```
