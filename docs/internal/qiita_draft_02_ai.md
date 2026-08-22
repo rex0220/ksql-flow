@@ -7,18 +7,16 @@ tags:
   - AIエージェント
 -->
 
-<!-- TODO: 第1話の公開後、以下のリンクを実 URL に差し替え -->
-
 > **as-is / no support**: 本ツールは MIT ライセンスで現状有姿のまま公開しており、サポート・動作保証・修正の約束はありません。本番投入は必ず `--dry-run` とステージング検証を経て、自己責任でお願いします。
 
 - GitHub: https://github.com/rex0220/ksql-flow （ランナー） / https://github.com/rex0220/kintone-sql-tools （エンジン + MCP） / https://github.com/rex0220/ksql-flow-template （本記事のテンプレート）
-- 前回: 【kSQL Flow #1】kintone のバッチ処理を SQL 1 本で書けるランナーの紹介
+- 前回: [【kSQL Flow #1】kintone のバッチ処理を SQL 1 本で書けるランナーの紹介](https://qiita.com/rex0220/items/893ab4016a5aaf595642)
 
 **AI が書く、機械が検査する、人間が承認する** — kintone の月次バッチをこの分担で作り、検査がブロッカーを見つけて AI が人間に対応を要求してくるところまで、実機の失敗ログ込みで一巡させた記録です。
 
 ## 前回のおさらいと、今回やること
 
-第1話では、kintone のバッチ処理（案件管理 → 顧客管理の月次集計）を SQL ファイル 1 本で定義し、kSQL Flow が排他・ログ・リラン・リトライを引き受ける構成を紹介しました。
+[第1話](https://qiita.com/rex0220/items/893ab4016a5aaf595642)では、kintone のバッチ処理（案件管理 → 顧客管理の月次集計）を SQL ファイル 1 本で定義し、kSQL Flow が排他・ログ・リラン・リトライを引き受ける構成を紹介しました。
 
 今回はそのジョブ SQL を、**要件文から AI エージェントに書かせます**。
 
@@ -438,7 +436,7 @@ npm run job -- -f jobs/monthly_deal_summary.sql --profile prod
 
 ## 今後の連載予定
 
-1. **#1**: kintone のバッチ処理を SQL 1 本で書けるランナーの紹介
+1. **#1**: [kintone のバッチ処理を SQL 1 本で書けるランナーの紹介](https://qiita.com/rex0220/items/893ab4016a5aaf595642)
 2. **#2（本記事）**: AI エージェントにジョブを書かせる（MCP + 二段 validate + dry-run レビュー）
 3. **#3**: タスクスケジューラで毎朝動かす — 実機で踏んだ罠 2 連発つき
 4. 以降、GitHub Actions / cron・Docker / AWS / Azure / GCP の環境別と、排他・冪等リランの設計深掘りを予定
