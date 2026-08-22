@@ -48,7 +48,7 @@ node dist/cli.js --help        # または npm i -g . で ksql-flow として導
 
 1. テンプレート zip を入手 — GitHub から直接: <https://github.com/rex0220/ksql-flow/raw/main/template/ksql-flow-log-template1.zip>
    （npm でインストール済みなら手元にもあります: `"$(npm root -g)/@rex0220/ksql-flow/template/ksql-flow-log-template1.zip"`）
-2. kintone システム管理 → アプリテンプレート → 読み込み → テンプレート「kSQL Flow 実行ログ」からアプリを作成
+2. kintone のアプリ作成画面で「テンプレートファイルを読み込む」を選び、zip を直接指定して作成（システム管理への登録は不要）
 3. 作成したアプリで API トークン（閲覧 + 追加 + 編集）を発行
 
 ### 2. 設定ファイルを保存

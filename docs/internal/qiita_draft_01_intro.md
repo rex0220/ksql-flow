@@ -173,7 +173,7 @@ npm i -g @rex0220/ksql-flow   # Node.js 18+
    ```
 
    （macOS / Linux は `$(npm root -g)/@rex0220/ksql-flow/template` にあります）
-2. kintone システム管理 → アプリテンプレート → 読み込み → テンプレート「kSQL Flow 実行ログ」からアプリを作成
+2. kintone のアプリ作成画面で「**テンプレートファイルを読み込む**」を選び、zip を直接指定して作成（システム管理への登録は不要です）
 3. 作成したアプリで API トークン（閲覧 + 追加 + 編集）を発行し、config の `logApp` に登録
 
 ```bash
