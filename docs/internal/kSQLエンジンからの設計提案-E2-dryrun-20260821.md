@@ -1,8 +1,8 @@
 # 設計提案: E-2 dry-run（書込抑止・差分プレビュー）— 実装前の往復用
 
 - 日付: 2026-08-21 ／ 差出: kintone-sql-tools（kSQL エンジン）／ 宛先: ksql-flow
-- 位置づけ: [依頼書 E-2](../../kintone-sql-tools/docs/flow_engine_requests_20260821.md) の「実装前に設計提案を文書で往復」への提案。
-- ステータス: ✅ **R2 確定（2026-08-22・[ksql-flow 回答](../../kintone-sql-tools/docs/flow_e2_dryrun_reply_20260822.md) を全面採用）→ 実装へ**。R1 からの確定差分は末尾「R2 確定事項」を参照。
+- 位置づけ: [依頼書 E-2](../../../kintone-sql-tools/docs/flow_engine_requests_20260821.md) の「実装前に設計提案を文書で往復」への提案。
+- ステータス: ✅ **R2 確定（2026-08-22・[ksql-flow 回答](../../../kintone-sql-tools/docs/flow_e2_dryrun_reply_20260822.md) を全面採用）→ 実装へ**。R1 からの確定差分は末尾「R2 確定事項」を参照。
 
 ## 0. 前提の訂正（実測）
 

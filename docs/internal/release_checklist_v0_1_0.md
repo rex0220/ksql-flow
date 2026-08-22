@@ -30,7 +30,7 @@
 | 1-1 | **秘密情報スキャン**: 全ファイル + 全コミット履歴（コミットは少数なので全件目視可）に、実ドメイン名・トークン・個人情報が無いことを確認。`gitleaks` 等の機械スキャン + 目視。examples / テストフィクスチャは `example.cybozu.com` 系のみであること | Codex（結果を Claude Code が再確認） |
 | 1-2 | `docs/` の公開判断: reviews / 裁定ログは**公開して良い**（開発過程の透明性は as-is 製品の信頼材料）。ただし 1-1 のスキャン対象に含める | Takashi（最終判断） |
 | 1-3 | `.gitignore` 確認: `.ksql/`（lock / state / logs）・`node_modules`・ビルド生成物・ローカル config | Codex |
-| 1-4 | `package.json` 整備: `name: @rex0220/ksql-flow`・`version: 0.1.0`・`license: MIT`・`bin`・`engines: node >=18`・`repository` / `homepage` / `bugs`（GitHub URL）・`files`（dist + README + LICENSE のみ）・`keywords`（kintone, sql, etl, batch, cli, dataops） | Codex |
+| 1-4 | `package.json` 整備: `name: @rex0220/ksql-flow`・`version: 0.1.0`・`license: MIT`・`bin`・`engines: node >=18`・`repository` / `homepage` / `bugs`（GitHub URL）・`files`（dist + template〈ログアプリ テンプレート zip・2026-08-22 裁定で追加〉 + README + LICENSE）・`keywords`（kintone, sql, etl, batch, cli, dataops） | Codex |
 | 1-5 | README 最終化: 冒頭の as-is / no support 宣言（既存）・インストール・クイックスタート（jobs 1 本 + config 最小例）・Exit Code 表・**エンジン × dialect × flow 互換表**（flow 0.1.0 ⇔ engine ^3.71.0 ⇔ dialect 1）・「商用サポートが必要なら SIer の有償サービスへ」の案内 | Codex |
 | 1-6 | examples/ 最終確認: 4 環境（GitHub Actions / タスクスケジューラ / cron / Docker）が現行 CLI フラグと一致 | Codex |
 | 1-7 | CHANGELOG.md 作成（v0.1.0 の 1 エントリ。以後のリリースで積む） | Codex |

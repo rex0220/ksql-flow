@@ -37,9 +37,10 @@ npm i -g @rex0220/ksql-flow
 # 1. 設定ファイルを用意（examples/ksql.config.json をコピーして編集）
 cp examples/ksql.config.json ./ksql.config.json
 
-# 2. ログアプリを作成（password 認証のプロファイルが必要。既存アプリを使う場合は --check-logapp で検査）
-ksql-flow init-logapp --profile prod
-ksql-flow validate --check-logapp --profile prod
+# 2. ログアプリを作成（推奨: 同梱テンプレートから。template/README.md 参照）
+#    kintone システム管理 → アプリテンプレート に template/ksql-flow-log-template1.zip を
+#    読み込み → テンプレートからアプリ作成 → API トークン発行（閲覧+追加+編集）
+ksql-flow validate --check-logapp --profile prod   # フィールド定義（job_key 重複禁止含む）を検査
 
 # 3. ジョブを検証してから実行
 ksql-flow validate -f jobs/01_sync.sql --profile prod
@@ -58,7 +59,7 @@ ksql-flow run-all <jobsDir> [--dry-run] [--sample 1..50] [--json]
                 [--resume|--from f|--only f]                   # ディレクトリ一括実行（ファイル名順 + depends_on）
                 [--stop-on-error | --continue-on-error]
 ksql-flow unlock                                               # ハングした前回セッションのロック解除
-ksql-flow init-logapp [--name アプリ名]                        # ログアプリの自動作成（要 password 認証）
+ksql-flow init-logapp [--name アプリ名]                        # ログアプリの自動作成（要 password 認証。通常は同梱テンプレート推奨 → template/）
 ```
 
 共通フラグ: `--profile <name>` `--config <path>` `--max-api-calls N` `--lock local-only` `--force-unlock`
@@ -117,7 +118,7 @@ ksql-flow run-all jobs --profile stg --dry-run --json > dry-run.json
 
 ## ログアプリと排他制御
 
-* 実行のたびに kintone ログアプリへ BATCH / JOB の親子レコードを記録します（フィールド定義は `ksql-flow init-logapp` が作るもの＝設計書 8.2）。
+* 実行のたびに kintone ログアプリへ BATCH / JOB の親子レコードを記録します（フィールド定義は設計書 8.2。**同梱の [アプリテンプレート](template/README.md) から作成するのが最も簡単**で、レイアウト・一覧も設定済みです）。
 * `job_key`（重複禁止フィールド）への RUNNING レコード先行 INSERT が分散ロックです。終了時に `job_key` はクリアされ `job_key_done` へ退避します。ハング時は `ksql-flow unlock`。
 * kintone 標準通知は次の 2 条件を設定します: (1) `record_type = BATCH` かつ status が FAILED 系（`FAILED` / `ABORTED` / `TIMEOUT`）、(2) `record_type = JOB` かつ `parent_batch_id` が空、かつ status が FAILED 系。run-all は BATCH で 1 通に集約し、単発 run の失敗は JOB 条件で拾います。
 * ログアプリへ書けない障害時もローカル `.ksql/logs/<batch_id>.jsonl` に必ず記録し、次回実行時に自動再送します。
@@ -140,7 +141,7 @@ ksql-flow run-all jobs --profile stg --dry-run --json > dry-run.json
 
 ## ドキュメント
 
-* [設計書 v2.8](docs/ksql_flow_design_v2_8.md) / [エンジンからの申し送り v3.71.0](docs/kSQLエンジンからの申し送り-20260822-v3710.md) / [実装前調査報告](docs/flow_runner_survey_20260821.md)
+* [設計書 v2.8](docs/ksql_flow_design_v2_8.md) / [エンジンからの申し送り v3.71.0](docs/internal/kSQLエンジンからの申し送り-20260822-v3710.md) / [開発経過 (docs/internal)](docs/internal/README.md) / [実装前調査報告](docs/internal/flow_runner_survey_20260821.md)
 * SQL 方言リファレンス: kintone-sql-tools [言語リファレンス §27](https://github.com/rex0220/kintone-sql-tools/blob/main/docs/ksql_language_reference.md)
 
 ## License

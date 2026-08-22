@@ -55,6 +55,8 @@ local `ksql.config.json` の dev profile:
 
 ログアプリは browser console 方式で生成済み（app 4249）。
 
+> **後日追記（2026-08-22）**: 一般利用者向けの作成手順は、レイアウト・一覧設定済みの**同梱アプリテンプレート**（template/ksql-flow-log-template1.zip）から作成する方式へ変更した（README / template/README.md / 設計書 v2.8 付録 B）。テンプレートのフィールド定義は 8.2 と機械突合済み（job_key unique 含む・秘密情報ゼロ）。console スクリプト（verification/logapp-console.js）と init-logapp は代替手段として残る。
+
 ```powershell
 ./verification/run-dev.ps1 validate --check-logapp --profile dev
 ```
