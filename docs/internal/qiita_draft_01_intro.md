@@ -281,7 +281,7 @@ ksql-flow run -f jobs/monthly_deal_summary.sql --profile prod
 ## 今後の連載予定
 
 1. **#1（本記事）**: 紹介とコンセプト
-2. **#2 AI にジョブを書かせる**: MCP でスキーマを渡して SQL を生成 → validate 二段構え → dry-run を人間の最終レビューにする
+2. **#2 [AI エージェントに kintone のバッチジョブを書かせる — MCP + Claude Code](https://qiita.com/rex0220/items/3a1213a596a8c49b67aa)**: スキーマを MCP から取得して SQL を生成 → validate 二段構え → dry-run を人間の最終レビューにする
 3. **#3 タスクスケジューラで毎朝動かす**: #2 で作ったジョブを Windows で実運用へ（実機で踏んだ罠 2 連発つき）
 4. 以降、GitHub Actions / cron・Docker / AWS / Azure / GCP の環境別と、排他・冪等リランの設計深掘りを予定
 
