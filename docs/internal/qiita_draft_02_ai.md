@@ -1,0 +1,230 @@
+<!--
+title: AI エージェントに kintone のバッチジョブを書かせる — MCP + kSQL Flow
+tags:
+  - kintone
+  - SQL
+  - MCP
+  - AIエージェント
+-->
+
+<!-- TODO: 第1話の公開後、以下のリンクを実 URL に差し替え -->
+
+> **as-is / no support**: 本ツールは MIT ライセンスで現状有姿のまま公開しており、サポート・動作保証・修正の約束はありません。本番投入は必ず `--dry-run` とステージング検証を経て、自己責任でお願いします。
+
+- GitHub: https://github.com/rex0220/ksql-flow （ランナー） / https://github.com/rex0220/kintone-sql-tools （エンジン + MCP）
+- 前回: 第1話「kintone のバッチ処理を SQL 1 本で書けるランナー「kSQL Flow」の紹介」
+
+## 前回のおさらいと、今回やること
+
+第1話では、kintone のバッチ処理（案件管理 → 顧客管理の月次集計）を SQL ファイル 1 本で定義し、kSQL Flow が排他・ログ・リラン・リトライを引き受ける構成を紹介しました。
+
+今回はそのジョブ SQL を、**要件文から AI エージェントに書かせます**。
+
+ポイントは役割分担です。
+
+| 役割 | 担当 |
+| --- | --- |
+| 生成（スキーマ確認・SQL 作成・手直し） | AI エージェント + kSQL MCP |
+| 検証（構文・スキーマ・安全ルール） | 機械（validate の二段構え） |
+| 最終判断（この差分を本番に流してよいか） | 人間（dry-run レビュー） |
+
+「AI が書いたコードを信用できるか」という問いに、**信用しなくて済む仕組みで答える**構成です。AI の善意や賢さではなく、実行系の検査で守ります。
+
+```mermaid
+flowchart LR
+    REQ["要件文<br/>（日本語）"] --> AI["AI エージェント<br/>+ kSQL MCP<br/>スキーマ確認 → SQL 生成<br/>→ 一次検証(ksql_validate)"]
+    AI --> JOB["jobs/*.sql<br/>（ジョブファイル）"]
+    JOB --> VAL["ksql-flow validate<br/>実行環境でフル検証"]
+    VAL --> DRY["ksql-flow run --dry-run<br/>差分プレビュー = 人間の最終レビュー"]
+    DRY -->|"承認"| GIT["Git へコミット<br/>= 運用資産"]
+    GIT -.->|"次回: スケジューラで毎朝実行"| OPS["定期実行"]
+```
+
+## なぜ AI との共通言語が SQL なのか（30 秒版）
+
+エンジン側の記事「AI エージェントに kintone を操作させるには SQL が最適解である」で詳しく書いた話の要点だけ:
+
+1. **SQL は LLM が最も得意なデータ操作言語。** JOIN・GROUP BY の説明は不要
+2. **1 文 = 1 意図。** 生成物を実行前に人間が読んでレビューできる
+3. **実行はサーバー側で完結。** 生レコードが AI のコンテキストを通らない
+
+そして第1話で紹介したジョブの構文 — `ASSERT`（業務異常で停止）、`EXIT SUCCESS IF`（対象なしは正常スキップ）、キー指定 `UPSERT`（冪等）— は、**AI が書いても安全側に倒れるための言語ガード**でもあります。ガードが言語に入っていれば、AI がガードを「書き忘れた」ことも機械検査で分かります。
+
+## 準備: kSQL MCP をエージェントにつなぐ
+
+前提は第1話の環境そのまま（営業支援パック + 追加 3 フィールド + ログアプリ + `ksql.config.json`）です。そこにエンジン側の MCP サーバーを足します。
+
+```bash
+npm i -g @rex0220/kintone-sql-tools
+```
+
+MCP 用の設定ファイル（`ksql.mcp.config.json`）を作ります。ここで 1 つだけ意識することがあります — **`logicalApps` の論理名を、kSQL Flow の config の `apps` と同じ名前にしておく**ことです。
+
+```json
+{
+  "version": 1,
+  "defaultProfile": "dev",
+  "profiles": {
+    "dev": {
+      "baseUrl": "https://example.cybozu.com",
+      "auth": "token",
+      "tokenMap": {
+        "APP100": "env:KSQL_TOKEN_DEALS_RO",
+        "APP200": "env:KSQL_TOKEN_CUSTOMERS_RO"
+      },
+      "logicalApps": { "案件管理": 100, "顧客管理": 200 }
+    }
+  }
+}
+```
+
+名前を揃えると、AI が対話中に書く `LAPP_案件管理` という表記が、**MCP での下見クエリと kSQL Flow のジョブでそのまま同じ意味になります**。生成した SQL を書き換えずにジョブファイルへ移せる、というのがこの構成の要です。
+
+トークンは **MCP 側には閲覧のみの別トークン**（上の例では `_RO`）を渡します。書き込みできるトークンはランナーの実行環境にしか置きません。つまりこの構成では、**AI は物理的に kintone へ書き込めません**。書き込みが起きる経路は「人間が `ksql-flow run` を叩く」だけです。
+
+Claude Code なら登録は 1 コマンドです。
+
+```bash
+claude mcp add ksql --env KSQL_CONFIG=/path/to/ksql.mcp.config.json -- ksql-mcp
+```
+
+（Claude Desktop は同梱の MCPB ファイルを拡張機能画面から読み込みます。手順はエンジン側リポジトリの `docs/ksql_mcpb_claude_desktop_install.md`）
+
+## 要件文からジョブを作らせる
+
+エージェントへの依頼は、業務要件をそのまま日本語で書きます。
+
+> 案件管理アプリから「当月受注予定」の案件を会社別に集計して、顧客管理アプリの `当月案件件数`・`当月売上合計`・`最終集計日時` を更新する kSQL Flow のジョブ（dialect 1）を書いてください。
+>
+> - マイナスの売上データがあれば異常として何も書かずに停止
+> - 対象が 0 件の月は正常スキップ（アラートを鳴らさない）
+> - 何度実行しても同じ結果になること（冪等）
+> - スキーマは思い込みで書かず、MCP で実際に確認してから書くこと
+
+最後の 1 行が実務上いちばん効きます。エージェントはまず `ksql_describe_app` でフィールドコードと型を取得し（ここで `受注予定日` が DATE、`売上` が NUMBER だと確定します）、`ksql_query` で件数確認の下見 SELECT を流し、それからジョブを書きます。仕様が曖昧な構文は `ksql_docs` で言語リファレンスを引かせれば、構文の発明も防げます。
+
+こうして生成・検証を通ったジョブの全文がこちらです。第1話で紹介したものと同じジョブに到達します。
+
+```sql
+-- @ksql name: monthly_deal_summary
+-- @ksql timeout: 600
+-- @ksql dialect: 1
+
+-- Step 1: 業務異常があれば安全停止（アラート対象）
+ASSERT (
+  SELECT COUNT(*) FROM LAPP_案件管理
+  WHERE 受注予定日 >= @MONTH_START() AND 受注予定日 < @NEXT_MONTH_START()
+    AND 売上 < 0
+) = 0, '【異常中断】マイナスの売上データが存在するため処理を停止しました';
+
+-- Step 2: インメモリ一時テーブルへ集計（この間 kintone API は消費しない）
+CREATE TEMP TABLE temp_monthly_summary AS
+SELECT 会社名, COUNT(案件No_) AS 案件件数, SUM(売上) AS 売上合計
+FROM LAPP_案件管理
+WHERE 受注予定日 >= @MONTH_START() AND 受注予定日 < @NEXT_MONTH_START()
+GROUP BY 会社名;
+
+-- Step 3: 対象 0 件は「正常な早期終了」（アラートを鳴らさない）
+EXIT SUCCESS IF (SELECT COUNT(*) FROM temp_monthly_summary) = 0,
+  '集計対象となる案件データが 0 件のためスキップ';
+
+-- Step 4: キー指定 UPSERT（何度リランしても同じ結果になる = 冪等）
+UPSERT INTO LAPP_顧客管理 (会社名, 当月案件件数, 当月売上合計, 最終集計日時)
+SELECT 会社名, 案件件数, 売上合計, @NOW()  -- @NOW() は実時計ではなくバッチ開始時の基準時刻（as-of）
+FROM temp_monthly_summary
+KEY (会社名);
+```
+
+これを `jobs/monthly_deal_summary.sql` に保存します。
+
+## 機械の検査が AI のミスを捕まえる（実例）
+
+「AI は間違える」前提で、どの間違いがどこで捕まるかを実際に試した結果です。
+
+**時刻関数の `@` を付け忘れた場合** — `@MONTH_START()` の代わりに `THIS_MONTH()` と書くと、`ksql-flow validate` が警告します。
+
+```
+monthly_deal_summary.sql: OK (警告 2 件)
+  monthly_deal_summary.sql:6:1 warning KSQL1306 bare の時刻依存関数は kintone サーバー評価の
+  ため as-of の対象外です。再現性が必要なら @ 付き関数を使用してください。
+```
+
+これは第1話の設計ポイント②（時刻はバッチ開始時に固定）を機械が守らせている、ということです。
+
+**UPSERT のキーを間違えた場合** — 顧客管理に存在しない `顧客名` をキーに書くと、エラーで止まります。
+
+```
+monthly_deal_summary.sql: NG (エラー 1 件 / 警告 0 件)
+  monthly_deal_summary.sql:24:1 error KSQL1302 UPSERT / MERGE のキー「顧客名」が
+  APP200 のフォームに存在しません。重複禁止を設定した文字列（1行）または
+  数値フィールドをキーにしてください。
+```
+
+キーに重複禁止が設定されていない場合も、同系統の検査（KSQL1303）で止まります。冪等リランの前提が崩れる書き込みは、実行前に拒否されます。
+
+**WHERE のフィールド名を間違えた場合** — `受注予定日` を `受注日` と書いた場合、これは validate では捕まりません（絞り込み条件は kintone 側で評価されるため）。ただし放置されるわけではなく、二重の網があります。まず AI に「MCP で確認してから書く」手順を踏ませていれば、`ksql_describe_app` と下見クエリの時点で露見します。それでもすり抜けた場合は、**dry-run の読み取り段階で kintone への問い合わせが解決できず、書き込みゼロのまま停止**します。
+
+```
+エラー内容: ArgumentError: WHERE predicate is unsupported
+  (field=受注日, operator=>=, reason=WHERE_FIELD_UNRESOLVED).
+```
+
+「どの検査が何を守るか」を知っておくと、AI への指示も検証の運用も設計できます。
+
+## 検証は二段構え
+
+生成した場所（AI との対話）と実行する場所（バッチの実行環境）は別物です。だから検証も二段にします。
+
+| 段階 | コマンド / ツール | 見るもの | いつ |
+| --- | --- | --- | --- |
+| 一次 | MCP `ksql_validate` | 構文・dialect 1 のルール・MCP 設定でのスキーマ | AI との対話中（即時） |
+| 二次 | `ksql-flow validate -f jobs/...` | **実行環境の** config・トークン・実スキーマ（UPSERT キーの実在と重複禁止まで） | ジョブファイル保存後 |
+
+一次検証は AI が自分で回せるので、対話の中で修正まで終わります。二次検証は「実行環境でも同じ結論になるか」の確認です。MCP の設定と実行環境の config が食い違っていた（アプリ ID が違う、トークンの権限が足りない等）というズレは、ここで出ます。
+
+```bash
+ksql-flow validate -f jobs/monthly_deal_summary.sql --profile prod
+```
+
+## dry-run が人間の最終レビュー
+
+最後の関門は機械ではなく人間です。ただしレビュー対象は SQL の字面ではなく、**「実行したら実際に何が起きるか」の差分**です。
+
+```bash
+ksql-flow run -f jobs/monthly_deal_summary.sql --profile prod --dry-run
+```
+
+```
+[DRY-RUN] monthly_deal_summary.sql (as-of: 2026-08-22T00:00:00.000Z)
+  読み取り        : 276 件（API 5 回）
+  書き込み予定    : LAPP_顧客管理  INSERT 1 件 / UPDATE 1 件 / DELETE 0 件
+  変更サンプル（先頭 5 件）:
+    会社名=山田商事  当月売上合計: 1,200,000 → 1,450,000
+    会社名=鈴木建設  (新規) 当月売上合計: 380,000
+  => dry-run 完了（kintone 書き込み 0 件）
+```
+
+「山田商事が 145 万に更新され、鈴木建設が新規で入る。件数は 2 件」— この粒度なら、SQL を読めない人でも承認判断ができます。`ASSERT` や `EXIT SUCCESS IF` の判定は dry-run でも本実行と同じに効くので、業務異常があればこの段階で Exit 2 で止まります。
+
+問題なければ、人間が `run` を実行します。AI に実行させないのは運用ルールではなく構成です — 前述のとおり、AI 側には書き込めるトークンがありません。
+
+## ジョブは Git へ — AI の成果物を運用資産にする
+
+出来上がった `jobs/monthly_deal_summary.sql` はただのテキストファイルなので、Git にコミットして PR でレビューできます。会話ログと違って、**AI 抜きで再実行・再検証できる資産**です。ジョブの変更はすべて PR 差分として残り、`validate` と `dry-run` は CI にも組み込めます（PR に dry-run の `--json` 出力を貼るレシピは GitHub Actions 編で扱う予定です）。
+
+まとめると、この構成の信頼モデルはこうなります。
+
+- AI は**読み取り専用の道具**でジョブを作る（書き込みトークンを持たない）
+- 機械は**二段の validate** で構文・スキーマ・安全ルールを検査する
+- 人間は **dry-run の差分**という「読める形」で最終判断する
+
+## 次回
+
+このジョブを **Windows タスクスケジューラで毎朝動かします**。実機検証で踏んだ「PowerShell が 0.1 秒で無言死する罠」を含む運用編です。
+
+## 今後の連載予定
+
+1. 第1話: kintone のバッチ処理を SQL 1 本で書けるランナー「kSQL Flow」の紹介
+2. **本記事**: AI エージェントにジョブを書かせる（MCP + 二段 validate + dry-run レビュー）
+3. タスクスケジューラで毎朝動かす: 実機で踏んだ罠 2 連発つき
+4. 以降、GitHub Actions / cron・Docker / AWS / Azure / GCP の環境別と、排他・冪等リランの設計深掘りを予定
