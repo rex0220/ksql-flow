@@ -12,6 +12,9 @@
   "bugs": {
     "url": "https://github.com/rex0220/ksql-flow/issues"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "keywords": [
     "kintone",
     "sql",
