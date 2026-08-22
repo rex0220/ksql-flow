@@ -85,6 +85,32 @@ KEY (顧客コード);
 **③ 冪等が復旧戦略。** kintone にトランザクションはありません（書込の原子性は 100 レコード/リクエスト単位）。だからこそキー指定 UPSERT を標準にして、「失敗したら同じジョブをもう一度流せば正しい状態に収束する」ことを復旧の基本にしています。
 （注: リランで収束するのは UPSERT が書き込むキーの範囲です。**誤ったデータで追加されてしまったレコードは、リランしても削除されません**。除去が必要な場合は、スコープを限定した DELETE 文をジョブに含めるか、手動で対処します）
 
+## ジョブ実行の流れ
+
+上のサンプルジョブを `run` すると、こう流れます。
+
+```mermaid
+flowchart TD
+    START(["ksql-flow run"]) --> LOCK{"多重起動チェック<br/>（ローカル + ログアプリの分散ロック）"}
+    LOCK -->|"別プロセスが実行中"| E5(["Exit 5<br/>何もせず終了"])
+    LOCK -->|"ロック取得"| RUN["ログアプリへ RUNNING 記録"]
+
+    RUN --> ASSERT{"Step 1: ASSERT<br/>業務データは正常か"}
+    ASSERT -->|"違反"| ABORT(["ABORTED / Exit 2<br/>書き込みゼロで停止・通知あり"])
+    ASSERT -->|"OK"| TEMP["Step 2: TEMP TABLE へ集計<br/>（インメモリ・書込 API 消費なし）"]
+
+    TEMP --> GATE{"Step 3: EXIT SUCCESS IF<br/>対象は 0 件か"}
+    GATE -->|"0 件"| NODATA(["NO_DATA / Exit 0<br/>正常スキップ・通知なし"])
+    GATE -->|"対象あり"| WRITE["Step 4: UPSERT 実行<br/>100 件/リクエストで自動分割<br/>チャンクごとに進捗記録・429/5xx は自動リトライ"]
+
+    WRITE -->|"リトライ上限超過など"| FAIL(["FAILED / Exit 3<br/>通知あり → --resume で同じ as-of からリラン"])
+    WRITE -->|"完了"| OK(["SUCCESS / Exit 0"])
+
+    E5 & ABORT & NODATA & FAIL & OK -.->|"終了ステータス・メトリクスを記録<br/>（ロックも解放）"| LOGEND["ログアプリ"]
+```
+
+「業務異常は書き込む前に止める（Exit 2）」「対象なしは静かに成功する（Exit 0・通知なし）」「途中失敗は記録を残して `--resume` で復旧する（Exit 3）」という 3 つの出口が、それぞれ別の Exit Code になっているのがポイントです。スケジューラや CI はこのコードだけで分岐できます。
+
 ## 実行は 3 段階: validate → dry-run → run
 
 ```bash
