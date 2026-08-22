@@ -11,7 +11,7 @@ tags:
 
 > **as-is / no support**: 本ツールは MIT ライセンスで現状有姿のまま公開しており、サポート・動作保証・修正の約束はありません。本番投入は必ず `--dry-run` とステージング検証を経て、自己責任でお願いします。
 
-- GitHub: https://github.com/rex0220/ksql-flow （ランナー） / https://github.com/rex0220/kintone-sql-tools （エンジン + MCP）
+- GitHub: https://github.com/rex0220/ksql-flow （ランナー） / https://github.com/rex0220/kintone-sql-tools （エンジン + MCP） / https://github.com/rex0220/ksql-flow-template （本記事のテンプレート）
 - 前回: 【kSQL Flow #1】kintone のバッチ処理を SQL 1 本で書けるランナーの紹介
 
 ## 前回のおさらいと、今回やること
@@ -60,50 +60,35 @@ flowchart LR
 
 （Claude Desktop や他の MCP 対応エージェントでも考え方は同じです。その場合の MCP 登録手順はエンジン側リポジトリの `docs/ksql_mcpb_claude_desktop_install.md` を参照してください）
 
-まずエンジン（MCP サーバー同梱）を入れます。
+この構成一式は**テンプレートリポジトリ**として公開しています。GitHub の「Use this template」で自分のリポジトリを作って clone すれば、以下が揃った状態から始められます。
 
-```bash
-npm i -g @rex0220/kintone-sql-tools
-```
-
-MCP 用の設定ファイル（`ksql.mcp.config.json`）を作ります。ここで 1 つだけ意識することがあります — **`logicalApps` の論理名を、kSQL Flow の config の `apps` と同じ名前にしておく**ことです。
-
-```json
-{
-  "version": 1,
-  "defaultProfile": "dev",
-  "profiles": {
-    "dev": {
-      "baseUrl": "https://example.cybozu.com",
-      "auth": "token",
-      "tokenMap": {
-        "APP100": "env:KSQL_TOKEN_DEALS_RO",
-        "APP200": "env:KSQL_TOKEN_CUSTOMERS_RO"
-      },
-      "logicalApps": { "案件管理": 100, "顧客管理": 200 }
-    }
-  }
-}
-```
-
-名前を揃えると、AI が対話中に書く `LAPP_案件管理` という表記が、**MCP での下見クエリと kSQL Flow のジョブでそのまま同じ意味になります**。生成した SQL を書き換えずにジョブファイルへ移せる、というのがこの構成の要です。
-
-MCP サーバーの登録は、リポジトリ直下で 1 コマンド。`--scope project` を付けると登録内容が `.mcp.json` としてリポジトリに保存されるので、**MCP の接続構成ごと Git 管理**でき、チームメンバーは clone するだけで同じ構成になります。
-
-```bash
-claude mcp add ksql --scope project --env KSQL_CONFIG=./ksql.mcp.config.json -- ksql-mcp
-```
-
-作業ディレクトリはこうなります（第1話の構成に 2 ファイル追加しただけです）:
+- https://github.com/rex0220/ksql-flow-template
 
 ```text
-batch/
-├── ksql.config.json         # ランナー用の接続設定（第1話で作成）
-├── ksql.mcp.config.json     # MCP 用の接続設定（閲覧のみトークン）
-├── .mcp.json                # Claude Code の MCP 登録（--scope project で生成）
+├── CLAUDE.md                 # AI 向けの作業規約（後述 — この構成の核）
+├── .mcp.json                 # Claude Code の MCP 登録（開くだけで kSQL MCP がつながる）
+├── ksql.config.json          # ランナー用の接続設定 — トークンは env: 参照
+├── ksql.mcp.config.json      # MCP 用の接続設定 — 閲覧のみトークン
 └── jobs/
-    └── monthly_deal_summary.sql   # これから AI に作らせる
+    └── monthly_deal_summary.sql   # 検証済みサンプルジョブ
 ```
+
+やることは、ツールのインストールと接続設定の書き換えだけです。
+
+```bash
+npm i -g @rex0220/ksql-flow @rex0220/kintone-sql-tools
+```
+
+`ksql.config.json`（ランナー用）と `ksql.mcp.config.json`（MCP 用）の `baseUrl` とアプリ `id` を自環境に合わせます。ここで 1 つだけ設計上のポイントがあります — テンプレートでは **MCP 側の `logicalApps` の論理名を、ランナー config の `apps` と同じ名前にしてあります**。こうすると、AI が対話中に書く `LAPP_案件管理` という表記が、**MCP での下見クエリと kSQL Flow のジョブでそのまま同じ意味になります**。生成した SQL を書き換えずにジョブファイルへ移せる、というのがこの構成の要です。
+
+### AI に kSQL Flow の知識を与える — CLAUDE.md と ksql_docs
+
+ここが今回の構成でいちばん重要な部分です。kSQL Flow は公開して間もない OSS なので、**LLM は学習データとしてほとんど知りません**。何もしなければ、エージェントは「それらしい構文」を発明します。この穴は 2 つの仕組みで塞ぎます。
+
+1. **方言仕様の一次資料は MCP の `ksql_docs`。** kSQL の言語リファレンスには Flow 拡張構文（dialect 1: ディレクティブ・`ASSERT`・`EXIT SUCCESS IF`・`@` 付き時刻関数）の章とレシピがあり、エージェントが章単位で取得できます。構文は覚えているものを書くのではなく、**その場で引かせます**
+2. **作業規約はリポジトリの `CLAUDE.md`。** Claude Code はリポジトリ直下の `CLAUDE.md` を毎セッション自動で読み込みます。テンプレートには、作成手順（スキーマ確認 → `ksql_docs` で方言確認 → 下見 → 生成 → 二段の validate → dry-run）、ジョブ規約（`@` 付き時刻関数・`ASSERT` と `EXIT SUCCESS IF` の使い分け・キー指定 UPSERT）、してはいけないこと（**本実行しない・構文を推測で書かない**）を記した [CLAUDE.md](https://github.com/rex0220/ksql-flow-template/blob/main/CLAUDE.md) が入っています
+
+つまり「AI が kSQL Flow を知らない」ことは前提であって、**知識は Git 管理された規約ファイルと MCP のドキュメントツールで毎回与える**設計です。規約を直せば AI の振る舞いも変わり、その変更履歴も Git に残ります。
 
 ### トークンは「閲覧のみ」と「書込可」を分ける
 
@@ -129,7 +114,7 @@ batch/
 
 最後の 1 行が実務上いちばん効きます。エージェントはまず `ksql_describe_app` でフィールドコードと型を取得し（ここで `受注予定日` が DATE、`売上` が NUMBER だと確定します）、`ksql_query` で件数確認の下見 SELECT を流し、それからジョブを書きます。仕様が曖昧な構文は `ksql_docs` で言語リファレンスを引かせれば、構文の発明も防げます。
 
-こうして生成・検証を通ったジョブの全文がこちらです。第1話で紹介したものと同じジョブに到達します。
+こうして生成・検証を通ったジョブの全文がこちらです。第1話で紹介したものと同じジョブに到達します（テンプレートに同梱してあるサンプルジョブもこれです — 初回は生成させずにサンプルで流れを確認する、でも構いません）。
 
 ```sql
 -- @ksql name: monthly_deal_summary

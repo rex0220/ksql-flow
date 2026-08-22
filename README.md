@@ -210,6 +210,7 @@ ksql-flow run-all jobs --profile stg --dry-run --json > dry-run.json
 * [公開仕様書](docs/ksql_flow_spec.md)（アーキテクチャ・実行モデル・ロック・リラン・ログ設計の正）
 * [CHANGELOG](CHANGELOG.md)
 * SQL 方言リファレンス: kintone-sql-tools [言語リファレンス §27](https://github.com/rex0220/kintone-sql-tools/blob/main/docs/ksql_language_reference.md)
+* AI エージェントとジョブを作る場合: [ksql-flow-template](https://github.com/rex0220/ksql-flow-template)（CLAUDE.md・MCP 設定・検証済みサンプルジョブ同梱のテンプレートリポジトリ）
 
 ## サポートと保証
 
