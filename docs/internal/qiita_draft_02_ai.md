@@ -1,5 +1,5 @@
 <!--
-title: AI エージェントに kintone のバッチジョブを書かせる — MCP + kSQL Flow
+title: 【kSQL Flow #2】AI エージェントに kintone のバッチジョブを書かせる — MCP + Claude Code
 tags:
   - kintone
   - SQL
@@ -12,7 +12,7 @@ tags:
 > **as-is / no support**: 本ツールは MIT ライセンスで現状有姿のまま公開しており、サポート・動作保証・修正の約束はありません。本番投入は必ず `--dry-run` とステージング検証を経て、自己責任でお願いします。
 
 - GitHub: https://github.com/rex0220/ksql-flow （ランナー） / https://github.com/rex0220/kintone-sql-tools （エンジン + MCP）
-- 前回: 第1話「kintone のバッチ処理を SQL 1 本で書けるランナー「kSQL Flow」の紹介」
+- 前回: 【kSQL Flow #1】kintone のバッチ処理を SQL 1 本で書けるランナーの紹介
 
 ## 前回のおさらいと、今回やること
 
@@ -250,7 +250,7 @@ ksql-flow run -f jobs/monthly_deal_summary.sql --profile prod --dry-run
 
 ## 今後の連載予定
 
-1. 第1話: kintone のバッチ処理を SQL 1 本で書けるランナー「kSQL Flow」の紹介
-2. **本記事**: AI エージェントにジョブを書かせる（MCP + 二段 validate + dry-run レビュー）
-3. タスクスケジューラで毎朝動かす: 実機で踏んだ罠 2 連発つき
+1. **#1**: kintone のバッチ処理を SQL 1 本で書けるランナーの紹介
+2. **#2（本記事）**: AI エージェントにジョブを書かせる（MCP + 二段 validate + dry-run レビュー）
+3. **#3**: タスクスケジューラで毎朝動かす — 実機で踏んだ罠 2 連発つき
 4. 以降、GitHub Actions / cron・Docker / AWS / Azure / GCP の環境別と、排他・冪等リランの設計深掘りを予定
