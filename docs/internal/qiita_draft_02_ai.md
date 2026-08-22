@@ -71,8 +71,11 @@ flowchart LR
 ├── ksql.config.json          # ランナー用の接続設定 — トークンは env: 参照
 ├── ksql.mcp.config.json      # MCP 用の接続設定 — 閲覧のみトークン
 ├── .env.example              # トークンの置き場所の雛形（.env は .gitignore 済み）
-└── jobs/
-    └── monthly_deal_summary.sql   # 検証済みサンプルジョブ
+├── jobs/
+│   └── monthly_deal_summary.sql   # 検証済みサンプルジョブ
+└── dev/                      # 開発用（後述 — テストデータの投入と片付け）
+    ├── seed_test_deals.sql
+    └── cleanup_test_deals.sql
 ```
 
 ### 環境構築（初回 15 分）
@@ -261,7 +264,55 @@ my-ksql-jobs  [main ≡ +0 ~2 -1 !] > npm run job -- -f jobs/monthly_deal_summar
   => NO_DATA (exit 0) 読取 0 件 / 書込 0 件 / API 5 回
 ```
 
-AI の宣言どおり NO_DATA（exit 0）で着地しました。アラートは鳴らず、実行ログアプリには NO_DATA の 1 レコードが残ります。「対象がない月は静かに成功する」（第1話の設計ポイント①）が、AI の書いたジョブでもそのまま機能した形です。集計経路を実データで動かしたい場合は、`--as-of "2025-12-01T00:00:00+09:00"` を付けてバックフィル実行すれば、2025-12 分の UPSERT が走ります。
+AI の宣言どおり NO_DATA（exit 0）で着地しました。アラートは鳴らず、実行ログアプリには NO_DATA の 1 レコードが残ります。「対象がない月は静かに成功する」（第1話の設計ポイント①）が、AI の書いたジョブでもそのまま機能した形です。
+
+## 当月データを投入して、書込経路まで検証する
+
+ただし、当月対象が 0 件のままでは UPSERT の**書込経路**を実データで確認できていません。そこで、テストデータ投入・片付けのジョブを用意して書込経路まで一巡させました（テンプレートの `dev/` に同梱してあります）。
+
+- `dev/seed_test_deals.sql` — テスト顧客 2 社を冪等 UPSERT → **当月日付**（`@TODAY()` / `@MONTH_START()`）のテスト案件 3 件を INSERT。再実行しても増殖しません
+- `dev/cleanup_test_deals.sql` — テスト会社名の完全一致で案件・顧客の両方を削除（件数ガードつき）
+
+会社名・案件名は `KSQL-FLOW-TEST-` プレフィックスなので、後から漏れなく片付けられます。日付が as-of 基準の関数なので、**いつ実行しても「その月の当月データ」になる**のがポイントです。
+
+### 実機だけが教えてくれた罠 — ルックアップ
+
+このシード、モックの E2E は一発で通りましたが、実機では 2 回失敗しました。どちらも SFA パックの案件管理の `会社名` が**ルックアップフィールド**（参照元 = 顧客管理）であることに起因します。
+
+```
+  => FAILED (exit 3) 読取 0 件 / 書込 0 件 / API 6 回
+  エラー内容: A value KSQL-FLOW-TEST-山田商事 in the field 会社名 does not exist
+  in the datasource app for lookup, or you do not have permission to view the app or the field.
+```
+
+1. **参照先にデータが必要。** ルックアップの値は参照先アプリに存在しないと書けません → シードの先頭で参照先（顧客管理）へテスト顧客を先に UPSERT する順序に修正
+2. **参照先トークンの併送が必要。** 修正後も同じエラー文で失敗。kintone はルックアップ付きレコードの書込時に、**参照先アプリの閲覧権限を同じリクエストのトークンで検証**します。config の案件管理に顧客管理のトークンも並べて解決:
+
+```json
+"案件管理": { "id": 100, "tokens": ["env:KSQL_TOKEN_DEALS", "env:KSQL_TOKEN_CUSTOMERS"] }
+```
+
+エラー文は同じでも原因が 2 つある、という設計です（メッセージ末尾の「or you do not have permission ...」が 2 つ目のヒント）。どちらも kintone の実挙動であって、モックでは原理的に見つかりません。**最後の検証は必ず実機で** — これもこの構成の手順に組み込んでおくべき教訓でした（テンプレートは両方反映済みです）。
+
+### 投入 → 本実行 — 書込経路も設計どおり
+
+```
+[RUN] seed_test_deals.sql (profile: prod, as-of: 2026-08-22T14:39:44.572Z)
+  => SUCCESS (exit 0) 読取 2 件 / 書込 5 件 / API 13 回
+```
+
+書込 5 件 = テスト顧客 2 社 + 当月案件 3 件。dry-run では「UPDATE 2 件」（テスト 2 社の集計欄が埋まる差分）が出ます。そして本実行:
+
+```
+[RUN] monthly_deal_summary.sql (profile: prod, as-of: 2026-08-22T14:40:41.096Z)
+  => SUCCESS (exit 0) 読取 5 件 / 書込 2 件 / API 9 回
+```
+
+顧客管理に「KSQL-FLOW-TEST-山田商事: 2 件 / 150,000」「KSQL-FLOW-TEST-鈴木建設: 1 件 / 380,000」が書き込まれ、NO_DATA 経路だけでなく **ASSERT → 集計 → UPSERT の書込経路まで実機で一巡**しました。検証が済んだら片付けます:
+
+```bash
+npm run job -- -f dev/cleanup_test_deals.sql --profile prod
+```
 
 ## 機械の検査が AI のミスを捕まえる（実例）
 
