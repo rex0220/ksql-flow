@@ -17,7 +17,10 @@ kintone でアプリ間集計や定期データ更新（月次売上をマスタ
 1. **クラウド型 ETL サービス** — ノーコードで即日構築でき、実行基盤の運用もお任せできる
 2. **自作の JavaScript / REST API スクリプト** — 自由度が高い一方、リトライ・排他制御・失敗時のリランといった運用まわりは自分で作り込むことになる
 
-どちらも選択肢としてある中で、kSQL Flow は「**定義は SQL 1 本・Git で管理し、実行環境と認証情報は自分の手元に置きたい**」という好みの人向けに作った、もう一つの選択肢です。実行・排他・リラン・実行ログ・リトライ・通知といった「バッチの面倒な部分」はランナーが引き受けます。実行場所は自分の環境（ローカル / 社内サーバー / GitHub Actions / Docker）で、**通信先は設定した kintone と通知 Webhook だけ**。テレメトリの類はありません（BYOC: Bring Your Own Cloud）。その代わり、実行基盤の構築・監視・トークン管理は自分の責務になります — このトレードオフを受け入れられる開発者・情シスの方が対象です。
+どちらも選択肢としてある中で、kSQL Flow は「**定義は SQL 1 本・Git で管理し、実行環境と認証情報は自分の手元に置きたい**」という好みの人向けに作った、もう一つの選択肢です。
+実行・排他・リラン・実行ログ・リトライ・通知といった「バッチの面倒な部分」はランナーが引き受けます。
+実行場所は自分の環境（ローカル / 社内サーバー / GitHub Actions / Docker）で、**通信先は設定した kintone と通知 Webhook だけ**。テレメトリの類はありません（BYOC: Bring Your Own Cloud）。
+その代わり、実行基盤の構築・監視・トークン管理は自分の責務になります — このトレードオフを受け入れられる開発者・情シスの方が対象です。
 
 SQL の解析・実行エンジンは、以前紹介した [kintone-sql-tools](https://github.com/rex0220/kintone-sql-tools)（kSQL）の公式 API を使っています。つまり **MCP で AI に SQL を書かせて、同じ方言でバッチも動かせる**構成です（この話は次回）。
 
@@ -153,13 +156,13 @@ ksql-flow run -f jobs/monthly_sales_sync.sql --profile prod
 
 設定は JSON 1 枚で、トークンは `env:` 参照（ファイルに平文を書かない）。存在しないキーや typo したフラグは**実行前に Exit 1** で止まる fail-closed 設計です。
 
-## インストールと実行環境
+## インストールから実行まで
 
 ```bash
 npm i -g @rex0220/ksql-flow   # Node.js 18+
 ```
 
-### ログアプリの作成（初回のみ・約 1 分）
+### 1. ログアプリの作成（初回のみ・約 1 分）
 
 「しくみ」の図に出てきた実行ログアプリは、**同梱のアプリテンプレートから作ります**。フィールド定義（分散ロック用の重複禁止設定まで）とレイアウト・一覧が設定済みです。
 
@@ -174,13 +177,65 @@ npm i -g @rex0220/ksql-flow   # Node.js 18+
 
    （macOS / Linux は `$(npm root -g)/@rex0220/ksql-flow/template` にあります）
 2. kintone のアプリ作成画面で「**テンプレートファイルを読み込む**」を選び、zip を直接指定して作成（システム管理への登録は不要です）
-3. 作成したアプリで API トークン（閲覧 + 追加 + 編集）を発行し、config の `logApp` に登録
+3. 作成したアプリで API トークン（閲覧 + 追加 + 編集）を発行
 
-```bash
-ksql-flow validate --check-logapp --profile prod   # 定義が揃っているか機械検査
+業務アプリ側（サンプルの受注・顧客マスタ）にも、閲覧 + 編集（INSERT するなら追加も）のトークンを用意しておきます。
+
+### 2. 設定ファイル（`ksql.config.json`）
+
+作業ディレクトリに保存します。**`id` は自環境のアプリ ID に置き換えてください**。トークン値はファイルに書かず、環境変数を参照します:
+
+```json
+{
+  "defaultProfile": "prod",
+  "profiles": {
+    "prod": {
+      "baseUrl": "https://example.cybozu.com",
+      "timezone": "Asia/Tokyo",
+      "auth": { "type": "apiToken" },
+      "apps": {
+        "受注":       { "id": 100, "tokens": ["env:KSQL_TOKEN_ORDERS"] },
+        "顧客マスタ": { "id": 200, "tokens": ["env:KSQL_TOKEN_CUSTOMERS"] },
+        "実行ログ":   { "id": 999, "tokens": ["env:KSQL_TOKEN_LOGS"] }
+      },
+      "logApp": "実行ログ"
+    }
+  }
+}
 ```
 
-`--check-logapp` がフィールド・型・重複禁止・選択肢まで検査するので、手作業のズレがあってもここで捕まります。
+`apps` の論理名（`受注` など）が、ジョブ SQL の `LAPP_受注` に対応します。
+
+### 3. トークンを環境変数に設定
+
+```powershell
+# Windows (PowerShell)
+$env:KSQL_TOKEN_ORDERS = "<受注アプリのトークン>"
+$env:KSQL_TOKEN_CUSTOMERS = "<顧客マスタのトークン>"
+$env:KSQL_TOKEN_LOGS = "<ログアプリのトークン>"
+```
+
+```bash
+# macOS / Linux (bash)
+export KSQL_TOKEN_ORDERS="<受注アプリのトークン>"
+export KSQL_TOKEN_CUSTOMERS="<顧客マスタのトークン>"
+export KSQL_TOKEN_LOGS="<ログアプリのトークン>"
+```
+
+未設定のまま実行しても、`env:` の解決失敗として実行前に Exit 1 で止まります。
+
+### 4. 実行
+
+冒頭のサンプルジョブを `jobs/monthly_sales_sync.sql` として保存したら、あとは前述の 3 段階です:
+
+```bash
+ksql-flow validate --check-logapp --profile prod    # ログアプリの定義検査（初回のみ）
+ksql-flow validate -f jobs/monthly_sales_sync.sql --profile prod
+ksql-flow run -f jobs/monthly_sales_sync.sql --profile prod --dry-run
+ksql-flow run -f jobs/monthly_sales_sync.sql --profile prod
+```
+
+`--check-logapp` はフィールド・型・重複禁止・選択肢まで機械検査するので、ログアプリ作成時に手作業のズレがあってもここで捕まります。実行が終わったら、kintone のログアプリを開いてみてください — 実行結果・処理件数・API 消費が 1 レコードとして残っているはずです。
 
 ### 定期実行はお好みの場所で
 
