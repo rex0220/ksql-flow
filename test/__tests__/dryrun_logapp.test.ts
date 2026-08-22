@@ -3,6 +3,7 @@ import { runCommand } from "../../src/commands/run";
 import { runAllCommand } from "../../src/commands/runAll";
 import { parseArgs } from "../../src/cli";
 import { checkLogAppCommand, initLogAppCommand } from "../../src/commands/initLogapp";
+import { LogAppClient } from "../../src/logapp";
 import { EXIT } from "../../src/types";
 import { AS_OF, buildWorld, customerRecords, LOG_APP, SAMPLE_JOB, TestWorld, writeJob } from "../helpers/world";
 
@@ -274,5 +275,26 @@ describe("init-logapp / --check-logapp（設計書 付録 B）", () => {
     const text = world.output.join("\n");
     expect(text).toContain("重複を禁止");
     expect(text).toContain("last_written_key");
+  });
+});
+
+describe("ログアプリの DROP_DOWN query", () => {
+  test("record_type / status は実 kintone が受理する IN 演算子を使う", async () => {
+    const queries: string[] = [];
+    const client = {
+      getRecords: jest.fn(async (request: { query?: string }) => {
+        queries.push(request.query ?? "");
+        return { records: [] };
+      }),
+    };
+    const logApp = new LogAppClient(client as never, LOG_APP, {} as never, {} as never);
+
+    await logApp.findLatestBatch("dev");
+    await logApp.listBatchJobs("batch-id");
+    await logApp.listRunning("dev");
+
+    expect(queries[0]).toContain('record_type in ("BATCH")');
+    expect(queries[1]).toContain('record_type in ("JOB")');
+    expect(queries[2]).toContain('status in ("RUNNING")');
   });
 });

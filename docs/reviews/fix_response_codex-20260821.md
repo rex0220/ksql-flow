@@ -186,3 +186,57 @@
 - 本リポジトリ: `docs/kSQL Flowからの申し送り-fix4-dryrun完了-20260822.md`
 - エンジンリポジトリ: `C:/Users/rex02/Projects/kintone-sql-tools/docs/flow_fix4_dryrun_completion_20260822.md`
 - ① fix4 完了、② Q3 縮退解除済み、③ metrics 判定 (a) / Q7 の2件が fix3 でクローズ済みであることを1通にまとめた。エンジン側への追加はこの新規文書1ファイルだけで、コード・既存文書は変更していない。
+
+## phase0-part1（実 kintone 検証・2026-08-22）
+
+### 実施項目と結果
+
+- PASS: §1 は先行実施済み・履歴混入ゼロ確認済み。
+- PASS: env 参照のみの local `ksql.config.json`（Asia/Tokyo、`limits.maxApiCalls = 2000`）と `verification/run-dev.ps1` / `.sh` を作成。
+- PASS: API token の `init-logapp` ガードを実測し、所定メッセージ + Exit 1 を確認。
+- PASS: 4 アプリの実フィールドを公式 `/flow` client の `getFields` で測定し、`verification/schema-notes.md` にフィールドコード / 型だけを記録。
+- PASS: jobs 2 本と normal / negative seed を作成。実 client 付き validate / validate-all は Exit 0。seed の KSQL1305 警告 4 件は意図した素の INSERT として受容。
+- PASS: 顧客管理の UPSERT キー `会社名` は重複禁止が有効。KSQL1301〜KSQL1303 なし。
+- PASS: seed 前 dry-run は NO_DATA / Exit 0、予定書込 0。4 アプリの前後レコード件数はすべて不変。
+- PASS: Windows / Node v24 で見つかった CLI 終了時 libuv assertion を `process.exitCode` の自然終了へ修正し、実 kintone validate の直接起動 Exit 0 で再検証。
+- PASS: `npm test -- --runInBand`（9 suites / 100 tests）と `npm run build`。
+- PASS: `dev.env` の既知の実ドメイン・token 値についてリポジトリ内完全一致 0、`docs/test-app/api.txt` の履歴 commit 0。
+- 未実施（安全規約どおり）: run、seed 実投入、実 kintone 書込。
+
+### Takashi さんへの依頼
+
+1. ログアプリ用 password 認証を、(a) `KSQL_DEV_USERNAME` / `KSQL_DEV_PASSWORD` としてリポジトリ外 `dev.env` へ追加し Codex に実行を任せる、または (b) Takashi さんが password 認証の一時 dev プロファイルで `init-logapp --profile dev` を実行する。
+2. 生成ログアプリの API token（閲覧 + 追加 + 編集）を発行し、`KSQL_DEV_TOKEN_LOGS` へ設定してアプリ ID を連絡する。
+3. Phase 0 後半で Webhook 実受信と Windows タスクスケジューラ 1 回起動を実施する。コピペ手順は `docs/release_verification_v0_1_0.md` に記載。
+
+### 残 TODO
+
+- ログアプリ生成 / token 設定 / `validate --check-logapp`。
+- 0-3 の normal seed 投入、dry-run 差分、run、ログ・メトリクス突合。
+- 0-4 の ASSERT / NO_DATA / 二重起動 / resume / 250 件チャンク実機確認。
+- 0-5 Webhook と 0-6 タスクスケジューラ（Takashi）。
+
+## phase0-part2（実 kintone 検証・2026-08-22）
+
+### 実施結果
+
+- 0-2 PASS: ログアプリ 4249 を local dev profile へ env 参照で追加し、`validate --check-logapp` が Exit 0。全フィールドと `job_key` 重複禁止を実検査した。
+- 0-3 PASS: normal seed で顧客 1 件・案件 260 件を投入。dry-run は予定 INSERT 0 / UPDATE 1 / DELETE 0、mutation 0、対象件数不変。本実行の written 1 と一致した。
+- 0-4 PASS: ASSERT は ABORTED / Exit 2 / written 0、NO_DATA は Exit 0 / written 0、二重起動は Exit 0 / 5、直後再実行 Exit 0。
+- 0-4 PASS: 260 案件 INSERT の JSONL は 100 / 100 / 60 の 3 チャンク。ログ JOB の read / written / API、`job_key` クリア、`job_key_done` 退避を実値で確認した。
+- 0-4 PASS: 無効 token は child process 環境だけへ注入。失敗 run-all の後、ログアプリを正にした `--resume` が失敗 JOB 1 本だけを元の as-of で再実行した。
+- 最終状態: 検証顧客 1、normal 案件 260、negative 0、RUNNING ログ 0。全体 cleanup は用意のみで未実行。
+
+### 実機で発見・修正した事項
+
+1. 案件管理の lookup 書込には送信先 token に加えて参照元顧客管理 token の併送が必要だった。local config の案件管理 tokens に両 env 参照を設定した。
+2. `LogAppClient.findLatestBatch` / `listBatchJobs` / `listRunning` が DROP_DOWN に `=` を使い、実 kintone で拒否された。`record_type` / `status` を `IN (...)` へ修正し、回帰テストを追加した。修正前は state.json fallback、修正後はログアプリを正に resume 成功。
+
+### 検証
+
+- `npm test -- --runInBand`: 9 suites / 101 tests PASS
+- `npm run build`: PASS
+- `dev.env` 実値のリポジトリ内完全一致: 0
+- `limits.maxApiCalls = 2000` 維持
+- `../kintone-sql-tools` 変更なし
+- 詳細は `docs/release_verification_v0_1_0.md` に記録

@@ -206,10 +206,12 @@ function runOptionsFromArgs(args: ParsedArgs) {
 
 if (require.main === module) {
   main(process.argv.slice(2)).then(
-    (code) => process.exit(code),
+    (code) => {
+      process.exitCode = code;
+    },
     (error) => {
       console.error(`エラー: ${errorMessage(error)}`);
-      process.exit(EXIT.RUNTIME);
+      process.exitCode = EXIT.RUNTIME;
     }
   );
 }

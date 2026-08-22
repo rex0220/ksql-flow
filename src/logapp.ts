@@ -263,7 +263,7 @@ export class LogAppClient {
   async findLatestBatch(profile: string): Promise<{ batchId: string; asOf: string | null } | null> {
     const result = await this.client.getRecords({
       app: this.appId,
-      query: `record_type = "BATCH" and profile = "${escapeQueryValue(profile)}" order by started_at desc limit 1`,
+      query: `record_type in ("BATCH") and profile = "${escapeQueryValue(profile)}" order by started_at desc limit 1`,
       fields: ["batch_id", "as_of", "status"],
     });
     const record = result.records[0];
@@ -278,7 +278,7 @@ export class LogAppClient {
   async listBatchJobs(parentBatchId: string): Promise<Array<{ scriptName: string; status: string; logDetail: string }>> {
     const result = await this.client.getRecords({
       app: this.appId,
-      query: `record_type = "JOB" and parent_batch_id = "${escapeQueryValue(parentBatchId)}" limit 500`,
+      query: `record_type in ("JOB") and parent_batch_id = "${escapeQueryValue(parentBatchId)}" limit 500`,
       fields: ["script_name", "status", "log_detail"],
     });
     return result.records.map((record) => ({
@@ -292,7 +292,7 @@ export class LogAppClient {
   async listRunning(profile: string): Promise<RunningRecord[]> {
     const result = await this.client.getRecords({
       app: this.appId,
-      query: `status = "RUNNING" and profile = "${escapeQueryValue(profile)}" limit 500`,
+      query: `status in ("RUNNING") and profile = "${escapeQueryValue(profile)}" limit 500`,
       fields: ["$id", "status", "started_at", "batch_id", "job_key"],
     });
     return result.records.map((record) => ({

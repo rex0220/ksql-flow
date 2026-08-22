@@ -17,3 +17,8 @@ coverage/
 # OS / editor
 .DS_Store
 Thumbs.db
+
+# 実機検証の接続情報（実ドメイン・API トークン。リポジトリ外 %USERPROFILE%\.ksql-flow-dev\ が正位置）
+docs/test-app/
+api.txt
+*.env
