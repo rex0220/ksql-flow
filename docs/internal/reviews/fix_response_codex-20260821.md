@@ -358,3 +358,44 @@
 - `npm run build`: PASS。
 - `git diff --check`: PASS（改行コード変換予告のみ、whitespace error なし）。
 - ネットワーク通信なし。`../kintone-sql-tools`、`~/.ksql-flow-dev/`、`docs/internal/ksql_flow_design_v2_9.md` は変更していない。
+
+## binary-2-4（Windows 単一実行バイナリ・2026-08-22）
+
+### 実装・ビルド手順
+
+- `esbuild@0.28.2` と `postject@1.0.0-alpha.6`（いずれも MIT）を devDependency に追加した。
+- `npm run build:win-binary` を追加した。`npm run build` 後、`scripts/build-win-binary.mjs` が `dist/cli.js` を起点に `@rex0220/kintone-sql-tools/flow` を含む単一 CJS（`platform: node` / `target: node18`）へバンドルし、Node SEA blob を生成して Windows x64 の `node.exe` に postject で注入する。
+- 同スクリプト内で exe の4項目 smoke、ZIP 作成、exe / ZIP の SHA-256 作成まで実行する。ZIP entry の時刻を固定し、同一入力・同一 Node/toolchain で連続2回再生成した exe / ZIP の SHA-256 が一致することを確認した。
+- 実行環境: Windows x64 / Node v24.14.0。実行コマンド: `npm run build:win-binary`。
+- `.gitignore` に `dist-bin/` を追加したため、既存の `template/ksql-flow-log-template1.zip` は引き続きコミット対象のまま、生成バイナリのみ除外される。
+
+### 成果物（実測）
+
+- `dist-bin/ksql-flow-v0.1.0-win-x64.zip`: 35,334,015 bytes
+  - SHA-256: `a4d6e2299bee158a273ec6da11df37bee9417fc094d9573704691602d5dba620`
+  - 内容: `ksql-flow.exe`、`LICENSE`、`README.txt`（バージョン・対応エンジン `^3.71.0`・as-is 注意の3行）
+- `dist-bin/ksql-flow.exe`: 92,575,232 bytes
+  - SHA-256: `339f43b68300eee216ee362e36424e46bb3142a61dcabdd9bc2af8b975edf53c`
+- `dist-bin/SHA256SUMS.txt`: 上記 ZIP / exe の両ハッシュを収録。
+
+### exe 直接実行の必須検証（実測）
+
+1. `ksql-flow.exe --help`: Exit 0。usage 表示を確認。
+2. config 不在ディレクトリで `ksql-flow.exe validate -f <package-smoke/smoke.sql>`: Exit 1。設定ファイルエラーを確認。
+3. `ksql-flow.exe run -f <package-smoke/smoke.sql> --dryrun`: Exit 1。`未知または不適用` を確認し、コマンド別 flag allowlist が SEA でも有効であることを確認。
+4. 一時生成したオフライン設定（`https://offline.invalid`、apps 空、認証情報なし）で `ksql-flow.exe validate -f test/fixtures/package-smoke/smoke.sql`: Exit 0、`smoke.sql: OK`。実 kintone 通信なし。
+
+4項目とも SEA / esbuild バンドルに起因する動的 `require` 等の実行時エラーなし。ビルドは設定ファイル・環境変数の認証情報を読み込まず、`dist/cli.js` と公開依存のみを入力とする。生成 exe の文字列検査ではビルド端末パス、`offline.invalid`、`cybozu.com`、`kintone.com` の混入なし。`Get-AuthenticodeSignature` は `NotSigned`（破損署名ではない）を確認した。
+
+### 既知の注意点
+
+- Node SEA は実験的機能で、exe にはビルド時の Node ランタイムが埋め込まれる。今回の成果物は Node v24.14.0 由来であり、リリース用の再生成は Windows x64 上で同じ Node / lockfile を用いる。
+- postject 注入は元の `node.exe` の Authenticode 署名を無効にするため、スクリプトは注入前に PE Certificate Table を除去する。成果物は未署名であり、コード署名が必要な配布では生成後に別途署名する。
+- 構文出力は Node 18 相当だが、単一 exe のランタイム自体は上記の埋め込み Node である。npm 配布の `engines.node >=18` 契約とは別に扱う。
+
+### 回帰検証
+
+- `npm test`: 13 suites / 146 tests 全通過
+- `npm run build`: 成功（`build:win-binary` の先頭でも実行）
+- `npm run typecheck`: 成功
+- `npm audit --omit=dev --audit-level=high`: 0 vulnerabilities

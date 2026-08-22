@@ -37,6 +37,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:win-binary": "npm run build && node scripts/build-win-binary.mjs",
     "test": "jest --runInBand",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev:engine-local": "npm install --no-save --package-lock=false @rex0220/kintone-sql-tools@file:../kintone-sql-tools"
@@ -48,7 +49,9 @@
     "@types/jest": "^29.5.12",
     "@types/node": "^18.19.0",
     "adm-zip": "^0.5.18",
+    "esbuild": "^0.28.2",
     "jest": "^29.7.0",
+    "postject": "^1.0.0-alpha.6",
     "ts-jest": "^29.1.2",
     "typescript": "^5.4.0"
   },
