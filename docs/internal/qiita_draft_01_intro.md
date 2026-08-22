@@ -20,8 +20,8 @@ SQL の解析・実行エンジンは、以前紹介した [kintone-sql-tools](h
 
 ```mermaid
 flowchart TD
-    SQL["jobs/*.sql<br/>（Git 管理）"]
-    CONFIG["ksql.config.json<br/>（トークンは env: 参照）"]
+    SQL["バッチ処理の定義（ジョブ）<br/>jobs/*.sql — Git 管理"]
+    CONFIG["接続設定<br/>ksql.config.json — トークンは env: 参照"]
 
     subgraph FLOW["kSQL Flow（CLI ランナー）"]
         direction TB
@@ -30,7 +30,7 @@ flowchart TD
         OPS --> ENGINE
     end
 
-    SQL --> FLOW
+    SQL -->|"処理内容を記述"| FLOW
     CONFIG --> FLOW
 
     ENGINE -->|"REST API<br/>（読み取り・UPSERT / DML）"| APPS["kintone 業務アプリ<br/>（受注・顧客マスタ など）"]
