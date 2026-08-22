@@ -50,9 +50,17 @@ flowchart LR
 
 そして第1話で紹介したジョブの構文 — `ASSERT`（業務異常で停止）、`EXIT SUCCESS IF`（対象なしは正常スキップ）、キー指定 `UPSERT`（冪等）— は、**AI が書いても安全側に倒れるための言語ガード**でもあります。ガードが言語に入っていれば、AI がガードを「書き忘れた」ことも機械検査で分かります。
 
-## 準備: kSQL MCP をエージェントにつなぐ
+## 準備: VSCode + Claude Code + kSQL MCP
 
-前提は第1話の環境そのまま（営業支援パック + 追加 3 フィールド + ログアプリ + `ksql.config.json`）です。そこにエンジン側の MCP サーバーを足します。
+前提は第1話の環境そのまま（営業支援パック + 追加 3 フィールド + ログアプリ + `ksql.config.json`）です。本記事では、第1話の作業ディレクトリを **VSCode で開き、Claude Code を使う**構成で進めます。理由は 3 つ:
+
+- ジョブ SQL・ランナー config・MCP 設定が **1 つのリポジトリに揃い、そのまま Git 管理**できる
+- エージェントが **MCP（スキーマ確認・下見クエリ）とターミナル（`ksql-flow validate` / `--dry-run`）の両方**を使える
+- 生成 → 検証 → 差分レビュー → コミットが 1 画面で完結する
+
+（Claude Desktop や他の MCP 対応エージェントでも考え方は同じです。その場合の MCP 登録手順はエンジン側リポジトリの `docs/ksql_mcpb_claude_desktop_install.md` を参照してください）
+
+まずエンジン（MCP サーバー同梱）を入れます。
 
 ```bash
 npm i -g @rex0220/kintone-sql-tools
@@ -80,15 +88,33 @@ MCP 用の設定ファイル（`ksql.mcp.config.json`）を作ります。ここ
 
 名前を揃えると、AI が対話中に書く `LAPP_案件管理` という表記が、**MCP での下見クエリと kSQL Flow のジョブでそのまま同じ意味になります**。生成した SQL を書き換えずにジョブファイルへ移せる、というのがこの構成の要です。
 
-トークンは **MCP 側には閲覧のみの別トークン**（上の例では `_RO`）を渡します。書き込みできるトークンはランナーの実行環境にしか置きません。つまりこの構成では、**AI は物理的に kintone へ書き込めません**。書き込みが起きる経路は「人間が `ksql-flow run` を叩く」だけです。
-
-Claude Code なら登録は 1 コマンドです。
+MCP サーバーの登録は、リポジトリ直下で 1 コマンド。`--scope project` を付けると登録内容が `.mcp.json` としてリポジトリに保存されるので、**MCP の接続構成ごと Git 管理**でき、チームメンバーは clone するだけで同じ構成になります。
 
 ```bash
-claude mcp add ksql --env KSQL_CONFIG=/path/to/ksql.mcp.config.json -- ksql-mcp
+claude mcp add ksql --scope project --env KSQL_CONFIG=./ksql.mcp.config.json -- ksql-mcp
 ```
 
-（Claude Desktop は同梱の MCPB ファイルを拡張機能画面から読み込みます。手順はエンジン側リポジトリの `docs/ksql_mcpb_claude_desktop_install.md`）
+作業ディレクトリはこうなります（第1話の構成に 2 ファイル追加しただけです）:
+
+```text
+batch/
+├── ksql.config.json         # ランナー用の接続設定（第1話で作成）
+├── ksql.mcp.config.json     # MCP 用の接続設定（閲覧のみトークン）
+├── .mcp.json                # Claude Code の MCP 登録（--scope project で生成）
+└── jobs/
+    └── monthly_deal_summary.sql   # これから AI に作らせる
+```
+
+### トークンは「閲覧のみ」と「書込可」を分ける
+
+この構成の安全性はトークンの分離で担保します。kintone の各アプリで**閲覧のみのトークン**と**書込可のトークン**を別々に発行し、置き場所を分けます。
+
+| 置き場所 | トークン | できること |
+| --- | --- | --- |
+| MCP 設定 + Claude Code セッションの環境変数 | 閲覧のみ（`_RO`） | スキーマ確認・下見クエリ・`validate`・`--dry-run` |
+| 人間のターミナルの環境変数 | 閲覧 + 編集（+ 追加） | `ksql-flow run`（本実行） |
+
+つまり **AI は validate と dry-run まで自走できますが、物理的に kintone へ書き込めません**。書き込みが起きる経路は「人間が自分のターミナルで `ksql-flow run` を叩く」だけです。運用ルールではなく構成で守ります。
 
 ## 要件文からジョブを作らせる
 
@@ -180,7 +206,7 @@ monthly_deal_summary.sql: NG (エラー 1 件 / 警告 0 件)
 | 一次 | MCP `ksql_validate` | 構文・dialect 1 のルール・MCP 設定でのスキーマ | AI との対話中（即時） |
 | 二次 | `ksql-flow validate -f jobs/...` | **実行環境の** config・トークン・実スキーマ（UPSERT キーの実在と重複禁止まで） | ジョブファイル保存後 |
 
-一次検証は AI が自分で回せるので、対話の中で修正まで終わります。二次検証は「実行環境でも同じ結論になるか」の確認です。MCP の設定と実行環境の config が食い違っていた（アプリ ID が違う、トークンの権限が足りない等）というズレは、ここで出ます。
+一次検証は MCP 経由で対話の中で終わります。二次検証は「実行環境でも同じ結論になるか」の確認で、VSCode + Claude Code 構成なら**これも AI がターミナルで実行し、結果を読んで自分で直すところまで自走**できます。MCP の設定と実行環境の config が食い違っていた（アプリ ID が違う等）というズレは、ここで出ます。
 
 ```bash
 ksql-flow validate -f jobs/monthly_deal_summary.sql --profile prod
@@ -188,7 +214,7 @@ ksql-flow validate -f jobs/monthly_deal_summary.sql --profile prod
 
 ## dry-run が人間の最終レビュー
 
-最後の関門は機械ではなく人間です。ただしレビュー対象は SQL の字面ではなく、**「実行したら実際に何が起きるか」の差分**です。
+最後の関門は機械ではなく人間です。ただしレビュー対象は SQL の字面ではなく、**「実行したら実際に何が起きるか」の差分**です。dry-run は閲覧トークンで動くので、ここまでは AI が実行して結果を会話に貼るところまで自走できます。
 
 ```bash
 ksql-flow run -f jobs/monthly_deal_summary.sql --profile prod --dry-run
@@ -206,17 +232,17 @@ ksql-flow run -f jobs/monthly_deal_summary.sql --profile prod --dry-run
 
 「山田商事が 145 万に更新され、鈴木建設が新規で入る。件数は 2 件」— この粒度なら、SQL を読めない人でも承認判断ができます。`ASSERT` や `EXIT SUCCESS IF` の判定は dry-run でも本実行と同じに効くので、業務異常があればこの段階で Exit 2 で止まります。
 
-問題なければ、人間が `run` を実行します。AI に実行させないのは運用ルールではなく構成です — 前述のとおり、AI 側には書き込めるトークンがありません。
+問題なければ、人間が**自分のターミナル**（書込可トークンが設定してある側）で `run` を実行します。AI に本実行させないのは運用ルールではなく構成です — AI 側の環境には書き込めるトークンがありません。
 
 ## ジョブは Git へ — AI の成果物を運用資産にする
 
-出来上がった `jobs/monthly_deal_summary.sql` はただのテキストファイルなので、Git にコミットして PR でレビューできます。会話ログと違って、**AI 抜きで再実行・再検証できる資産**です。ジョブの変更はすべて PR 差分として残り、`validate` と `dry-run` は CI にも組み込めます（PR に dry-run の `--json` 出力を貼るレシピは GitHub Actions 編で扱う予定です）。
+出来上がった `jobs/monthly_deal_summary.sql` はただのテキストファイルなので、そのままコミットして PR でレビューできます。VSCode + Claude Code 構成なら、ジョブも config も MCP 接続設定（`.mcp.json`）も同じリポジトリにあるので、**「AI がジョブを書いた」という出来事の全体が Git の履歴に残ります**。会話ログと違って、**AI 抜きで再実行・再検証できる資産**です。`validate` と `dry-run` は CI にも組み込めます（PR に dry-run の `--json` 出力を貼るレシピは GitHub Actions 編で扱う予定です）。
 
 まとめると、この構成の信頼モデルはこうなります。
 
-- AI は**読み取り専用の道具**でジョブを作る（書き込みトークンを持たない）
+- AI は**閲覧のみトークン**でジョブを作り、validate・dry-run まで自走する（書込トークンを持たない）
 - 機械は**二段の validate** で構文・スキーマ・安全ルールを検査する
-- 人間は **dry-run の差分**という「読める形」で最終判断する
+- 人間は **dry-run の差分**という「読める形」で最終判断し、本実行だけを自分の手で行う
 
 ## 次回
 
