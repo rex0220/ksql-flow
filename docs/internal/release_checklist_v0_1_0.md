@@ -50,8 +50,8 @@
 
 | # | 項目 | 担当 |
 | --- | --- | --- |
-| 3-1 | `npm publish --access public`（@rex0220 スコープ） | Takashi（認証が必要） |
-| 3-2 | 公開版の実測確認（エンジン側 B170 と同じ流儀）: `npm view` で latest 確認 → まっさらな環境で `npm i -g @rex0220/ksql-flow` → `ksql-flow --help` と `validate` スモーク | Codex |
+| 3-1 ✅ | `npm publish --access public`（@rex0220 スコープ） | Takashi（認証が必要） |
+| 3-2 ✅ | 公開版の実測確認（エンジン側 B170 と同じ流儀）: `npm view` で latest 確認 → まっさらな環境で `npm i -g @rex0220/ksql-flow` → `ksql-flow --help` と `validate` スモーク | Codex |
 
 ## Phase 4: 公開後
 
