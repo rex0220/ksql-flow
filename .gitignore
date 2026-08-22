@@ -8,8 +8,10 @@ dist/
 
 # ローカル運用ファイル（トークン等の env: 参照を含むため念のため除外。例は examples/ を参照）
 ksql.config.json
+ksql.config.local.json
 .env
 .env.*
+.npmrc
 
 # test / coverage
 coverage/

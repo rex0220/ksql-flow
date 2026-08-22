@@ -1,5 +1,7 @@
 # kSQL Flow
 
+[![CI](https://github.com/rex0220/ksql-flow/actions/workflows/ci.yml/badge.svg)](https://github.com/rex0220/ksql-flow/actions/workflows/ci.yml)
+
 kintone のための As Code / DataOps エンジン（CLI 実行ランナー）。SQL スクリプト 1 本で、kintone のアプリ間集計・定期データ更新パイプラインを定義・実行します。
 
 > **Maintenance: as-is / no support**
@@ -18,7 +20,7 @@ kintone のための As Code / DataOps エンジン（CLI 実行ランナー）�
 
 ## 概要
 
-* SQL（[kSQL Flow dialect 1](../kintone-sql-tools/docs/ksql_language_reference.md)）でジョブを書き、`ksql-flow` が実行・排他・リラン・ログ記録・リトライ・通知を面倒みます。
+* SQL（[kSQL Flow dialect 1](https://github.com/rex0220/kintone-sql-tools/blob/main/docs/ksql_language_reference.md)）でジョブを書き、`ksql-flow` が実行・排他・リラン・ログ記録・リトライ・通知を面倒みます。
 * SQL の解析・検証・実行はすべて [kintone-sql-tools](https://github.com/rex0220/kintone-sql-tools)（kSQL エンジン）の公式 API `@rex0220/kintone-sql-tools/flow` 経由。本リポジトリに SQL 実装はありません。
 * **BYOC**: 実行基盤・認証情報はすべて利用者環境内で完結。通信先は (1) 設定した kintone、(2) 設定した通知 Webhook のみ。テレメトリ・ライセンス照会は一切ありません。
 
@@ -33,8 +35,36 @@ npm i -g @rex0220/ksql-flow
 
 ## クイックスタート
 
+最小の `ksql.config.json`（トークン値はファイルへ書かず、環境変数を参照します）:
+
+```json
+{
+  "defaultProfile": "prod",
+  "profiles": {
+    "prod": {
+      "baseUrl": "https://example.cybozu.com",
+      "timezone": "Asia/Tokyo",
+      "auth": { "type": "apiToken" },
+      "apps": {
+        "顧客マスタ": { "id": 200, "tokens": ["env:KSQL_TOKEN_CUSTOMERS"] },
+        "実行ログ": { "id": 999, "tokens": ["env:KSQL_TOKEN_LOGS"] }
+      },
+      "logApp": "実行ログ"
+    }
+  }
+}
+```
+
+最小の `jobs/01_sync.sql`:
+
+```sql
+-- @ksql name: sync_customers
+-- @ksql dialect: 1
+UPDATE LAPP_顧客マスタ SET 処理済み = '済' WHERE 処理済み != '済';
+```
+
 ```bash
-# 1. 設定ファイルを用意（examples/ksql.config.json をコピーして編集）
+# 1. 設定ファイルを用意（上記または examples/ksql.config.json をコピーして編集）
 cp examples/ksql.config.json ./ksql.config.json
 
 # 2. ログアプリを作成（推奨: 同梱テンプレートから。template/README.md 参照）
@@ -113,6 +143,7 @@ ksql-flow run-all jobs --profile stg --dry-run --json > dry-run.json
 * 秘密情報は `env:VAR_NAME` 形式で環境変数参照にする（平文を書かない）。
 * `extends` は接続設定・`limits`・`retry` 等を継承しますが、**`apps` と `logApp` は継承しません**（stg のつもりが prod を更新する事故の構造的防止。各プロファイルで明示定義が必要）。
 * `apps.<名前>.tokens` は 1 アプリ複数トークン対応（カンマ結合で送信・上限 9 個）。リクエストごとに対象アプリのトークンのみ送信します。
+* lookup フィールドを書き込む場合、書込先アプリのトークンに加えて、lookup 参照元アプリの閲覧権限を持つトークンも同じリクエストへ併送する必要がある場合があります。書込先の `tokens` に必要な参照元トークンも指定してください（合計上限 9 個）。
 * `limits.maxApiCalls` は**ログアプリへの書き込み・ロック操作・リトライの各試行を含む** HTTP リクエスト数の単一カウンタで判定します。
 * `notifications.onFailure.webhook`: FAILED / ABORTED / TIMEOUT 時に汎用 JSON を POST（`NO_DATA` では通知しません）。`heartbeat` は裁定 Q1 に基づき、`SUCCESS` / `NO_DATA` を含む Exit 0 の完了時に必ず ping します。
 
@@ -124,12 +155,11 @@ ksql-flow run-all jobs --profile stg --dry-run --json > dry-run.json
 * ログアプリへ書けない障害時もローカル `.ksql/logs/<batch_id>.jsonl` に必ず記録し、次回実行時に自動再送します。
 * `logging.stripLiterals: true` でログ上の SQL からリテラル値を除去。認証情報はいかなるログ・エラーにも出力されません。
 
-## 互換表（エンジン × dialect × Flow）
+## 互換表（Flow × エンジン × dialect）
 
-| kintone-sql-tools | dialect 0 | dialect 1 | ksql-flow |
-| --- | --- | --- | --- |
-| **v3.71.0** | ✅ | ✅（`previewStatement`） | **✅ 0.1.x（dry-run 本実装）** |
-| **v3.70.0** | ✅ | ✅ | **✅ 0.1.x** |
+| ksql-flow | @rex0220/kintone-sql-tools | dialect |
+| --- | --- | --- |
+| **0.1.0** | **^3.71.0** | **1** |
 
 ジョブは `-- @ksql dialect: 1` を宣言してください（Flow 構文 = `ASSERT <条件>, 'msg'` / `ASSERT WARN` / `EXIT SUCCESS IF` / `MERGE` / `KEY()` / `@` 付き時刻関数）。1 スクリプトの文数上限は 20 文です。
 
@@ -138,6 +168,10 @@ ksql-flow run-all jobs --profile stg --dry-run --json > dry-run.json
 * チェックポイントの `last_written_key` は、最後に成功した書込チャンクの最終キー値です。書込順の保証はなく、復旧ウォーターマークではなく障害調査用の診断情報として扱います。キー値を取得できない操作ではチャンク情報のみを記録します。
 * クライアント証明書（`clientCert`）・`proxy` は未対応です。設定されている場合は、安全のため無視せず ConfigError（Exit 1）で停止します。現バージョンを使う場合はこれらの設定を削除してください。
 * 並列実行（`--parallel`）は未対応（設計書どおり初期リリースは順次実行）。
+
+## Windows タスクスケジューラ / PowerShell 5.1
+
+[examples/windows-task-scheduler/run_batch.bat](examples/windows-task-scheduler/run_batch.bat) を利用できます。`.ps1` に置き換えて Windows PowerShell 5.1 (`powershell.exe`) から実行する場合、日本語を含むスクリプトは **UTF-8 with BOM** で保存してください。BOM なし UTF-8 は PowerShell 5.1 で ANSI と解釈され、文字化けやパースエラーになることがあります。PowerShell 7 (`pwsh`) は BOM なし UTF-8 を標準で扱います。
 
 ## ドキュメント
 

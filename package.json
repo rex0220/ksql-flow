@@ -4,6 +4,22 @@
   "description": "kSQL Flow — batch runner CLI for kintone-sql-tools Flow dialect 1 (orchestration, locking, rerun, log app, retry, notification)",
   "license": "MIT",
   "author": "rex0220",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rex0220/ksql-flow.git"
+  },
+  "homepage": "https://github.com/rex0220/ksql-flow#readme",
+  "bugs": {
+    "url": "https://github.com/rex0220/ksql-flow/issues"
+  },
+  "keywords": [
+    "kintone",
+    "sql",
+    "etl",
+    "batch",
+    "cli",
+    "dataops"
+  ],
   "type": "commonjs",
   "engines": {
     "node": ">=18"

@@ -27,15 +27,15 @@
 
 | # | 項目 | 担当 |
 | --- | --- | --- |
-| 1-1 | **秘密情報スキャン**: 全ファイル + 全コミット履歴（コミットは少数なので全件目視可）に、実ドメイン名・トークン・個人情報が無いことを確認。`gitleaks` 等の機械スキャン + 目視。examples / テストフィクスチャは `example.cybozu.com` 系のみであること | Codex（結果を Claude Code が再確認） |
+| 1-1 ✅ | **秘密情報スキャン**: 現作業ツリー + 全 5 コミットを Secretlint 13.0.4 推奨ルール、秘密形式の追加正規表現、ドメイン / メール / 40 文字列の列挙、テンプレート ZIP 内部確認で精査し、実ドメイン・実トークン・未裁定の個人情報は 0 件。除外裁定: (1) Git author / committer `Takashi Fujita <rex0220@gmail.com>` は既公開 `rex0220/kintone-sql-tools` で同一 identity の 1,430 コミット（rex0220 名義を含め 1,731 件）が公開済みのため新規開示でない、(2) `package-lock.json` の第三者メンテナメールは npm 公開メタデータ、(3) `mock.cybozu.com` / `stg.cybozu.com` / `example*.cybozu.com` は fixture / 文書用ダミー、(4) 履歴は `d7ade5a` を含む 5 コミットが正。詳細は `reviews/fix_response_codex-20260821.md` の phase1 節 | Codex（結果を Claude Code が再確認） |
 | 1-2 | `docs/` の公開判断: reviews / 裁定ログは**公開して良い**（開発過程の透明性は as-is 製品の信頼材料）。ただし 1-1 のスキャン対象に含める | Takashi（最終判断） |
-| 1-3 | `.gitignore` 確認: `.ksql/`（lock / state / logs）・`node_modules`・ビルド生成物・ローカル config | Codex |
-| 1-4 | `package.json` 整備: `name: @rex0220/ksql-flow`・`version: 0.1.0`・`license: MIT`・`bin`・`engines: node >=18`・`repository` / `homepage` / `bugs`（GitHub URL）・`files`（dist + template〈ログアプリ テンプレート zip・2026-08-22 裁定で追加〉 + README + LICENSE）・`keywords`（kintone, sql, etl, batch, cli, dataops） | Codex |
-| 1-5 | README 最終化: 冒頭の as-is / no support 宣言（既存）・インストール・クイックスタート（jobs 1 本 + config 最小例）・Exit Code 表・**エンジン × dialect × flow 互換表**（flow 0.1.0 ⇔ engine ^3.71.0 ⇔ dialect 1）・「商用サポートが必要なら SIer の有償サービスへ」の案内 | Codex |
-| 1-6 | examples/ 最終確認: 4 環境（GitHub Actions / タスクスケジューラ / cron / Docker）が現行 CLI フラグと一致 | Codex |
-| 1-7 | CHANGELOG.md 作成（v0.1.0 の 1 エントリ。以後のリリースで積む） | Codex |
-| 1-8 | `npm pack` して tarball の中身を実測確認（dist のみ・ソースマップ / テスト / docs が混入していない）→ tarball から別ディレクトリへ install して CLI スモーク（`--help` / `validate`） | Codex |
-| 1-9 | 公開版 CI（GitHub Actions）: push / PR で test + build。エンジンはレジストリ pin。公開リポジトリでグリーンバッジが見えることは as-is 製品の数少ない品質シグナルなので v0.1.0 に含める | Codex |
+| 1-3 ✅ | `.gitignore` 確認: `.ksql/`（lock / state / logs）・`node_modules`・ビルド生成物・ローカル config | Codex |
+| 1-4 ✅ | `package.json` 整備: `name: @rex0220/ksql-flow`・`version: 0.1.0`・`license: MIT`・`bin`・`engines: node >=18`・`repository` / `homepage` / `bugs`（GitHub URL）・`files`（dist + template〈ログアプリ テンプレート zip・2026-08-22 裁定で追加〉 + README + LICENSE）・`keywords`（kintone, sql, etl, batch, cli, dataops） | Codex |
+| 1-5 ✅ | README 最終化: 冒頭の as-is / no support 宣言（既存）・インストール・クイックスタート（jobs 1 本 + config 最小例）・Exit Code 表・**エンジン × dialect × flow 互換表**（flow 0.1.0 ⇔ engine ^3.71.0 ⇔ dialect 1）・「商用サポートが必要なら SIer の有償サービスへ」の案内 | Codex |
+| 1-6 ✅ | examples/ 最終確認: 4 環境（GitHub Actions / タスクスケジューラ / cron / Docker）が現行 CLI フラグと一致 | Codex |
+| 1-7 ✅ | CHANGELOG.md 作成（v0.1.0 の 1 エントリ。以後のリリースで積む） | Codex |
+| 1-8 ✅ | `npm pack` して tarball の中身を実測確認（dist のみ・ソースマップ / テスト / docs が混入していない）→ tarball から別ディレクトリへ install して CLI スモーク（`--help` / `validate`） | Codex |
+| 1-9 ✅ | 公開版 CI（GitHub Actions）: push / PR で test + build。エンジンはレジストリ pin。公開リポジトリでグリーンバッジが見えることは as-is 製品の数少ない品質シグナルなので v0.1.0 に含める | Codex |
 
 ## Phase 2: GitHub 公開
 

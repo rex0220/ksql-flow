@@ -49,35 +49,37 @@ kintone におけるアプリ間集計・定期データ更新（ETL / バッチ
 
 ## 2. アーキテクチャ構成
 
-```
-［業務要件・プロンプト］
-     │
-     ▼
-［Claude Code / Antigravity / AI］
-     │ （kSQL MCP を通じてスキーマ取得・クエリ検証）
-     ▼
-［jobs/*.sql］ ─── Git 管理（PR レビュー / バージョン管理）
-     │
-     ▼
-［kSQL Flow (CLI 実行エンジン)］
-     │
-     ├─ ⓪ 多重起動ロック取得（ローカル + ログアプリ RUNNING レコード）
-     ├─ ① 構文検証・実行計画確認（EXPLAIN / dry-run: 差分プレビュー・推定 API 数）
-     ├─ ② ASSERT / EXIT による事前データ整合性チェック
-     ├─ ③ インメモリ一時テーブル（TEMP TABLE）による多段集計・加工
-     ├─ ④ ターゲットアプリへの一括 UPSERT / MERGE / DML（進捗チェックポイント記録）
-     ├─ ⑤ 障害検知・自動リトライ（指数バックオフ + Retry-After 尊重）
-     └─ ⑥ 実行メトリクス計測（所要時間・API 消費回数・処理件数・上限制御）
-     │
-     ├──────────────┬──────────────┐
-     ▼              ▼              ▼
-［kintone アプリ］ ［kintone ログアプリ］ ［外部通知 (Webhook/ExitCode)］
- (データ更新)     (全実行履歴の蓄積)    (エラー時即時アラート)
-                        │
-                        └─ 書き込み不能時: ローカル JSONL へフォールバック → 次回実行時に再送
+```mermaid
+flowchart TD
+    REQ["業務要件・プロンプト"]
+    AI["Claude Code / Antigravity / AI"]
+    JOBS["jobs/*.sql<br/>Git 管理（PR レビュー / バージョン管理）"]
+
+    REQ --> AI
+    AI -->|"kSQL MCP を通じて<br/>スキーマ取得・クエリ検証"| JOBS
+    JOBS --> RUNNER
+
+    subgraph RUNNER["kSQL Flow（CLI 実行エンジン）"]
+        direction TB
+        S0["⓪ 多重起動ロック取得<br/>（ローカル + ログアプリ RUNNING レコード）"]
+        S1["① 構文検証・実行計画確認<br/>（EXPLAIN / dry-run: 差分プレビュー・推定 API 数）"]
+        S2["② ASSERT / EXIT による事前データ整合性チェック"]
+        S3["③ インメモリ一時テーブル（TEMP TABLE）による多段集計・加工"]
+        S4["④ ターゲットアプリへの一括 UPSERT / MERGE / DML<br/>（進捗チェックポイント記録）"]
+        S5["⑤ 障害検知・自動リトライ<br/>（指数バックオフ + Retry-After 尊重）"]
+        S6["⑥ 実行メトリクス計測<br/>（所要時間・API 消費回数・処理件数・上限制御）"]
+        S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6
+    end
+
+    RUNNER --> APPS["kintone アプリ<br/>（データ更新）"]
+    RUNNER --> LOG["kintone ログアプリ<br/>（全実行履歴の蓄積）"]
+    RUNNER --> NOTIFY["外部通知（Webhook / Exit Code）<br/>（エラー時即時アラート）"]
+
+    LOG -.->|"書き込み不能時:<br/>フォールバック"| JSONL["ローカル JSONL<br/>（.ksql/logs/）"]
+    JSONL -.->|"次回実行時に再送"| LOG
 ```
 
-> **前提条件（充足済み）**: 図中の「kSQL MCP を通じてクエリ検証」は、MCP が Flow 拡張構文（dialect 1）を検証できることが前提です。この前提は kintone-sql-tools **v3.69.0** で充足されました（→ 3.7、申し送り文書参照）。なお MCP の `ksql_validate` はネットワーク 0 の契約のため updateKey 等のスキーマ依存検証は含まず、フル検証はランナーの `validate`（公式 API `/flow` の `validateScript(source, { client })`）で行います。
+> **前提条件（充足済み）**: 図中の「kSQL MCP を通じてクエリ検証」は、MCP が Flow 拡張構文（dialect 1）を検証できることが前提です。この前提は kintone-sql-tools **v3.69.0** で充足されました（→ 3.7、申し送り文書参照。ランナーが実際に要求するエンジンは **^3.71.0** — README の互換表を参照）。なお MCP の `ksql_validate` はネットワーク 0 の契約のため updateKey 等のスキーマ依存検証は含まず、フル検証はランナーの `validate`（公式 API `/flow` の `validateScript(source, { client })`）で行います。
 
 **通信先の限定（セキュリティモデルの要点、詳細は 12 章）**: kSQL Flow が通信するのは (1) 設定された kintone 環境、(2) 利用者が設定した通知 Webhook のみ。rex0220 側サーバーへのテレメトリ送信・ライセンス照会等の外部通信は一切行わない。
 
@@ -146,6 +148,7 @@ KEY (顧客コード);
 * `NO_DATA` は成功扱いであり、後続の依存ジョブは通常どおり実行されます。
 * この表の「通知」は**失敗アラート（`notifications.onFailure`）のみ**を指します。heartbeat（7.3）は「完走したか」の合図であり、`NO_DATA` を含む Exit 0 の完了で**送信します**（NO_DATA で送らないと、月次ジョブ等で dead man's switch が毎日誤発報するため — 裁定 Q1）。
 * ステータス語彙は `SUCCESS` / `NO_DATA` / `ABORTED` / `FAILED` / `SKIPPED`（依存ジョブの失敗による未実行）/ `RUNNING` / `TIMEOUT` とし、「対象 0 件」と「依存元失敗による未実行」を別語で表します。
+* なお 7.1 / 10.3 に登場する `LOCKED` は**プロセスの終了状態（Exit 5）であり、ログアプリの status 値ではありません**。ロック競合したジョブはレコード上 `SKIPPED`（理由 LOCKED — 8.2 の log_detail 契約）として現れます。
 
 ### 3.3 ジョブヘッダメタデータ（`-- @ksql`）
 
@@ -220,7 +223,7 @@ DELETE MISSING WITHIN (WHERE 当月売上実績 > 0);
 * **Flow 構文は正規エイリアスとして追加**: `CREATE TEMP TABLE x AS SELECT ...`（裸名） ≡ `CREATE TEMP TABLE #x AS SELECT ...`、`UPSERT ... KEY (...)` ≡ `UPSERT ... ON DUPLICATE (...)` とし、`MERGE`（3.4）もこの UPSERT へ正規化します。どちらの表記も同一の内部表現に解決され、意味差はありません。
 * **Flow 専用文**（`ASSERT <条件>, 'msg'` 形式・`ASSERT WARN`・`EXIT SUCCESS IF`・`-- @ksql` ヘッダ・時刻関数の as-of 固定評価）は dialect 1 の追加仕様として既存エンジンに実装され、MCP の `ksql_validate` も同一実装を共有します。
 * **dialect 0 との互換**: `ASSERT <式> <比較> <式>` は dialect 0 の既存機能として従来どおり動作します。dialect 0 のスクリプトでエラーになるのは **Flow 形式（`, 'msg'` 付き / `WARN`）を使った場合のみ**です（申し送り 3.5、エンジン側裁定 Q1）。
-* **実装状況**: エンジン・MCP への Flow 構文実装は **kintone-sql-tools v3.69.0 で完了**（受入基準全達成）。公式 API `@rex0220/kintone-sql-tools/flow`（parseScript / validateScript / explainScript / executeStatement ほか、文単位実行対応）が semver 対象として提供されており、Flow CLI（本リポジトリ）はこれに依存して実装します。詳細は申し送り文書と kintone-sql-tools 言語リファレンス §27 を参照。
+* **実装状況**: エンジン・MCP への Flow 構文実装は **kintone-sql-tools v3.69.0 で当初分が完了**（受入基準全達成）し、v3.70.0（`onChunkWritten` チャンク観測・metrics スナップショット・explain の as-of）、v3.71.0（`previewStatement` 差分プレビュー）で拡張されました（経緯は付録 C）。公式 API `@rex0220/kintone-sql-tools/flow`（parseScript / validateScript / explainScript / executeStatement / previewStatement ほか、文単位実行対応）が semver 対象として提供されており、Flow CLI（本リポジトリ）はこれに依存して実装します。詳細は申し送り文書と kintone-sql-tools 言語リファレンス §27 を参照。
 
 ### 3.8 リポジトリ構成（全面 MIT）
 
@@ -238,11 +241,11 @@ ksql-flow（本リポジトリ・MIT）
   └─ 実行ランナー: run / run-all / --resume / --dry-run 差分プレビュー /
      多重起動排他（5.5）/ チェックポイント（5.1）/ ログアプリ書込・再送（8 章）/
      通知・heartbeat（7.3）/ リトライ（7 章）
-     → npm 依存として @rex0220/ksql を利用
+     → npm 依存として @rex0220/kintone-sql-tools（公式 API /flow サブパス）を利用
 ```
 
 * **構文はエンジン側、実行はランナー側**: 2 章のアーキテクチャ（AI が MCP 経由で Flow SQL を生成・検証）は、MCP が dialect 1 を理解できてこそ成立するため、構文・検証系はエンジンに置きます。ランナーは運用品質（排他・resume・ログ・リトライ）に専念します。
-* **エンジン API の公開契約化**: ksql-flow が依存するエンジン API（AST・実行計画・クエリ実行）は `@rex0220/ksql` の公式 API として切り出し、semver で管理します。エンジンバージョン × dialect の互換表を両リポジトリの README に掲示します。
+* **エンジン API の公開契約化**: ksql-flow が依存するエンジン API（AST・実行計画・クエリ実行）は `@rex0220/kintone-sql-tools` の公式 API（`/flow` サブパス）として切り出し、semver で管理します。エンジンバージョン × dialect の互換表を両リポジトリの README に掲示します。
 * **エコシステム上の位置付け**: SQL 方言と MCP を含むツールチェーン全体がオープンであることは、kintone における As Code 運用の共通基盤（標準候補）としての採用・派生・他ツールからの対応実装を最大化するための選択です。互換ランナーやフォークの出現は歓迎します。
 
 ---
@@ -275,7 +278,7 @@ ksql run-all ./jobs/ --profile prod --continue-on-error
 
 ### 5.1 トランザクション不在と「部分適用」の明示
 
-**kintone には複数リクエストにまたがるトランザクションがありません**。さらに現行エンジン（v3.70.0）は `bulkRequest` を使用しておらず、書込は **100 レコード/リクエスト**で送信されるため、**原子性の単位は 1 リクエスト = 最大 100 レコード**です（申し送り 3.2。kintone API 自体の `bulkRequest`〈最大 20 リクエスト〉は将来のエンジン側課題 M5 として保留中）。したがって、例えば 3 万件の UPSERT 中 1.2 万件時点でリトライ上限を超過した場合、**更新は途中まで適用された状態で `FAILED` になります**。kSQL Flow はこの事実を隠さず、次の設計で復旧可能性を担保します。
+**kintone には複数リクエストにまたがるトランザクションがありません**。さらに現行エンジン（v3.71.0 現在。最新の対応版は README 互換表を参照）は `bulkRequest` を使用しておらず、書込は **100 レコード/リクエスト**で送信されるため、**原子性の単位は 1 リクエスト = 最大 100 レコード**です（申し送り 3.2。kintone API 自体の `bulkRequest`〈最大 20 リクエスト〉は将来のエンジン側課題 M5 として保留中）。したがって、例えば 3 万件の UPSERT 中 1.2 万件時点でリトライ上限を超過した場合、**更新は途中まで適用された状態で `FAILED` になります**。kSQL Flow はこの事実を隠さず、次の設計で復旧可能性を担保します。
 
 1. **冪等な書き込みの標準化**: キー指定の `UPSERT` / `MERGE` を標準とし、**同じジョブを何度リランしても最終状態が同じになる**ことを復旧の基本戦略とする。冪等性は「重複防止」のためだけでなく、**部分適用状態からの復旧手段そのもの**である。
 2. **進捗診断情報の記録**: DML 実行中、成功したチャンクの処理件数・チャンク番号と、取得できる場合はそのチャンクの最終キー値を記録する。`last_written_key` は**最後に成功した書込チャンクの最終キー値（順序保証なし）**であり、部分適用時の影響範囲を調査するための診断情報に限る。書込順はキー昇順とは限らず、単調な復旧ウォーターマークや途中再開位置として使用しない。キー値が取得できない操作ではチャンク情報のみを記録する。
@@ -331,7 +334,7 @@ ksql run -f jobs/02_calc_daily_sales.sql --profile prod --as-of "2026-08-01T00:0
 
 ### 6.1 リラン方式
 
-1. **自動再開 (`--resume`)**: 直近セッションで `FAILED` / `ABORTED` / `SKIPPED` となったジョブのみを抽出して再開。**元セッションの as-of を引き継ぐ**（5.3）。
+1. **自動再開 (`--resume`)**: 直近セッションで失敗・未完了となったジョブのみを抽出して再開（**対象の正確な規則は 6.3** — `FAILED` / `ABORTED` / `TIMEOUT` / 失敗起因の `SKIPPED` / `RUNNING`〈クラッシュ〉/ JOB レコード不在〈未着手〉）。**元セッションの as-of を引き継ぐ**（5.3）。
 
 ```bash
 ksql run-all ./jobs/ --profile prod --resume
@@ -394,7 +397,7 @@ ksql run-all ./jobs/ --profile prod --only 02_calc_daily_sales.sql
    │   └─ 書き込み不能時: ローカル .ksql/logs/<batch_id>.jsonl へ必ず記録し、
    │      次回実行時にログアプリへ自動再送（第 4 防壁自体を単一障害点にしない）
    │ ・Webhook / チャットツール / メールへ即時アラート送信
-   └─ 明確な終了コードを返却（→ 10.2）
+   └─ 明確な終了コードを返却（→ 10.3）
 ```
 
 ### 7.1 エラー種別とハンドリング一覧
@@ -459,7 +462,7 @@ kintone の API リクエスト数は **1 アプリあたり 1 日 10,000 回**�
 | `git_ref` | Git リビジョン | 文字列 | 実行時の commit hash（As Code の再現性の要） |
 | `ksql_version` | エンジン版数 | 文字列 | kSQL Flow のバージョン |
 | `error_message` | エラー内容 | 文字列(複数行) | ASSERT 失敗理由または API エラーメッセージ |
-| `log_detail` | 実行詳細ログ | 文字列(複数行) | 実行クエリ履歴・スタックトレース（切り詰めあり → 8.3） |
+| `log_detail` | 実行詳細ログ | 文字列(複数行) | 実行クエリ履歴・スタックトレース（切り詰めあり → 8.3）。**SKIPPED の理由は本フィールド先頭の `SKIPPED (<理由>)` 形式**（filtered / LOCKED / dependency: x / stop-on-error 等）で記録し、6.3 の resume 選抜と 10.3 の集約判定はこの前方一致を契約とする |
 
 ### 8.3 ログの上限とフォールバック
 
@@ -595,7 +598,7 @@ ksql unlock --profile prod
 
 `--dry-run` は「実行しないこと」ではなく「**実行したら何が起きるかを見せること**」を価値の中心とします。
 
-ランナーは通常実行と同じ `asOf` / `timezone` を持つ単一の `ExecutionContext` を生成し、文を先頭から順に処理します。SELECT / CREATE TEMP TABLE / ASSERT / EXIT SUCCESS IF / SET 等の read-only 文は `executeStatement` で実行し、INSERT / UPDATE / DELETE / UPSERT（MERGE 正規化後を含む）は `previewStatement` で差分を算出します。これにより一時テーブル・変数を後続 DML のプレビューから参照できます。
+ランナーは通常実行と同じ `asOf` / `timezone` を持つ単一の `ExecutionContext` を生成し、文を先頭から順に処理します。SELECT / CREATE TEMP TABLE / ASSERT / EXIT SUCCESS IF / SET（エンジン既存の変数構文 — 3.7 のとおり dialect 0 の既存機能は Flow ジョブ内でも有効。詳細は言語リファレンス）等の read-only 文は `executeStatement` で実行し、INSERT / UPDATE / DELETE / UPSERT（MERGE 正規化後を含む）は `previewStatement` で差分を算出します。これにより一時テーブル・変数を後続 DML のプレビューから参照できます。
 
 ```
 [DRY-RUN] 02_calc_daily_sales.sql (as-of: 2026-08-22T00:00:00+09:00)
@@ -703,7 +706,7 @@ BYOC の訴求点を監査に耐える形で明文化します。
 
 * **プロファイル分離**: `dev` / `stg` / `prod` を config で分離し、同一 SQL を段階適用する。`stg` は本番と同構成のアプリ群（テンプレート複製）を推奨。
 * **CI での静的検証**: PR ごとに `ksql validate-all ./jobs/ --profile stg` を実行し、構文・論理名・updateKey 制約・推定 API 消費を機械チェックする。ランナーの `validate` は公式 API `/flow` の `validateScript(source, { client })` を用いるためスキーマ依存検証を含むフル検証となる。一方 MCP の `ksql_validate` はネットワーク 0 の契約で updateKey 等の検証を含まないため、**AI 生成時の一次チェックは MCP、確定チェックはランナーの validate** という二段構えになる（申し送り 4）。
-* **CI での dry-run**: main マージ前に `ksql-flow validate-all ./jobs --profile stg` と `ksql-flow run-all ./jobs --profile stg --dry-run --json` を実行し、機械可読な差分プレビューを PR コメントへ貼る運用を推奨手順として提供。dry-run も読み取り API を実消費するため（10.2）、大規模アプリでは対象ジョブの絞り込みや実行頻度の調整を推奨する。
+* **CI での dry-run**: main マージ前に `ksql validate-all ./jobs --profile stg` と `ksql run-all ./jobs --profile stg --dry-run --json` を実行し（本書のコマンド例は 10.1 の規約どおり `ksql` と略記。実コマンド名は `ksql-flow` — コピペ用の実例は examples/ を参照）、機械可読な差分プレビューを PR コメントへ貼る運用を推奨手順として提供。dry-run も読み取り API を実消費するため（10.2）、大規模アプリでは対象ジョブの絞り込みや実行頻度の調整を推奨する。
 * **テストデータ**: stg への投入用に `ksql run -f seed/xxx.sql --profile stg` を用いたシードジョブを定義できる（テストも SQL で As Code 化）。
 
 ---
@@ -712,7 +715,7 @@ BYOC の訴求点を監査に耐える形で明文化します。
 
 * **ライセンス**: **MIT**。エンジン（kintone-sql-tools）・ランナー（ksql-flow）ともに MIT で公開し、ツールチェーン全体をオープンにする。ライセンスキー・EULA・課金の仕組みは持たない。
 * **リポジトリ**: 本プロジェクト（ランナー・設計書・配布物）は **`ksql-flow` リポジトリ**で管理する。分担は 3.8 に従う。
-* **配布**: npm パッケージ（`npm i -g @rex0220/ksql-flow`）と、Node.js 環境を持たない Windows サーバー向けの**単一実行バイナリ**（GitHub Releases、チェックサム付き）の二系統。エンジンは従来どおり `@rex0220/ksql` として独立配布。
+* **配布**: npm パッケージ（`npm i -g @rex0220/ksql-flow`）と、Node.js 環境を持たない Windows サーバー向けの**単一実行バイナリ**（GitHub Releases、チェックサム付き）の二系統。エンジンは従来どおり `@rex0220/kintone-sql-tools` として独立配布。
 * **コマンド名**: 既存の kSQL CLI（kintone-sql-tools）が `ksql` コマンドを提供済みのため、Flow の実行コマンドは **`ksql-flow`** とし名前衝突を避ける（本書のコマンド例は略記として `ksql` と表記）。既存 CLI へのサブコマンド統合（`ksql flow run ...`）は 3.7 の単一エンジン戦略の進展に合わせて検討する。GitHub / npm の `ksql-flow` 名は先行して確保する。
 * **バージョンポリシー**: エンジンは semver。SQL 方言は dialect 番号で独立管理（3.6）。エンジン × dialect の互換表を README に掲示（3.8）。
 

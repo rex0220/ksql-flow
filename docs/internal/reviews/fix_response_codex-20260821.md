@@ -240,3 +240,36 @@
 - `limits.maxApiCalls = 2000` 維持
 - `../kintone-sql-tools` 変更なし
 - 詳細は `docs/release_verification_v0_1_0.md` に記録
+
+## phase1（初回公開準備・2026-08-22）
+
+### 1-1 秘密情報スキャン
+
+- 対象は現作業ツリー（追跡 / 未追跡の公開予定ファイルを含む）と、`8b03ab6` / `6ece2c9` / `bef763d` / `96e7d54` / `d7ade5a` の全 5 コミット。依頼文の 4 コミットは誤記であり、裁定どおり `d7ade5a` まで含めた。
+- Secretlint 13.0.4 の推奨ルールを現作業ツリーと各コミットの `git archive` 展開内容へ個別実行し、すべて Exit 0。Gitleaks はローカル未導入で、公式バイナリ取得は実行環境の TLS 認証制約、Docker 版は daemon 未起動のため利用できなかったので、同目的の Secretlint と下記の全履歴スキャンで代替した。
+- 全履歴へ秘密形式（private key、AWS access key、GitHub token、Slack token / webhook、JWT、Bearer / Basic credential）の正規表現スキャンを行い、すべて 0 件。40 文字の英数字列は全件 `package-lock.json` の npm integrity / 公開メタデータ由来で、実トークンは 0 件。
+- kintone ドメイン列挙は `example.cybozu.com` / `example-stg.cybozu.com` / `mock.cybozu.com` / `stg.cybozu.com` のみ。裁定どおり fixture / 文書用ダミーとして許容し、その他の実ドメインは 0 件。
+- メール列挙は Git metadata の `Takashi Fujita <rex0220@gmail.com>` と `package-lock.json` の `i@izs.me` のみ。前者は既公開の `rex0220/kintone-sql-tools` に同一 identity で 1,430 コミット（rex0220 名義を含め 1,731 件）公開済みの確立した OSS 公開 identity で、新規開示ではないため許容。文書中の `Takashi` / `rex0220` 参照も同じ公開 identity。後者は第三者パッケージメンテナの npm 公開メタデータとして許容。その他の個人情報は 0 件。
+- `template/ksql-flow-log-template1.zip` を ZIP 内部まで確認し、`01/template.json` についてドメイン、メール、上記秘密形式がすべて 0 件。署名ファイルを含む ZIP エントリも列挙し、想定の 3 エントリのみだった。
+- 結論: 裁定済み除外項目以外に、実ドメイン・実トークン・その他の個人情報は検出されなかった。
+
+### 1-3〜1-7 公開物の整備
+
+- 1-3: `.gitignore` の `.ksql/`、`node_modules/`、`dist/`、`ksql.config.json`、`.env*` を `git check-ignore -v` で実測確認。ローカル用 `ksql.config.local.json` と、公開 token を置き得る `.npmrc` も追加した。
+- 1-4: `package.json` に `repository` / `homepage` / `bugs` の GitHub URLと、`kintone`, `sql`, `etl`, `batch`, `cli`, `dataops` の keywords を追加。既存の name / version / license / bin / engines / files と合わせて公開メタデータを完成させた。
+- 1-5: README に CI バッジ、最小 config + 1 ジョブのクイックスタート、lookup 書込時の参照元アプリ token 併送注記、PowerShell 5.1 の UTF-8 BOM 注記、`ksql-flow 0.1.0` ⇔ engine `^3.71.0` ⇔ dialect `1` の互換表を反映した。既存の as-is / no support、SIer 有償サービス案内、Exit Code 表は維持した。
+- 1-6: GitHub Actions / Windows タスクスケジューラ / cron / Docker の 4 例を現行 `--help` と照合。`test/__tests__/examples.test.ts` も PASS。Windows 例へ PowerShell 5.1 の BOM 注意を追記した。
+- 1-7: `CHANGELOG.md` を作成し、`0.1.0`（2026-08-22）の初回リリース内容を 1 エントリに集約した。
+
+### 1-8 npm pack / 別ディレクトリ smoke
+
+- `npm pack --json` の実測: `@rex0220/ksql-flow@0.1.0`、49,916 bytes（展開 176,909 bytes）、25 files。
+- tarball は `dist/*.js`、`template/`、`README.md`、`LICENSE`、`package.json` のみ。`src/`、`test/`、`docs/`、source map は 0 件。
+- `%TEMP%/ksql-flow-phase1-smoke-20260822` へ tarball から install。依存はレジストリ版 `@rex0220/kintone-sql-tools@3.71.0`。同梱 CLI の `--help` は Exit 0、通信不要の smoke SQL に対する `validate` は `smoke.sql: OK` / Exit 0。
+- 実 kintone への通信は行っていない。`~/.ksql-flow-dev/` と `../kintone-sql-tools` は変更していない。
+
+### 1-9 公開 CI と最終検証
+
+- `.github/workflows/ci.yml` を追加。push / pull_request で Node.js 20 / 22 の matrix、`npm ci`、`npm ls @rex0220/kintone-sql-tools@^3.71.0`、`npm test`、`npm run build` を実行し、dependency は `package-lock.json` の npm registry tarball を使う。
+- README 冒頭へ `ci.yml` の GitHub Actions バッジを追加した。公開後の実バッジ状態は Phase 2 の push 後に GitHub 上で確認する。
+- ローカル最終検証: `npm test` は 9 suites / 101 tests PASS、`npm run build` PASS、`git diff --check` PASS。
