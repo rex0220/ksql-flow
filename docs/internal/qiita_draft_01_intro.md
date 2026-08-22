@@ -1,4 +1,9 @@
-# kintone のバッチ処理を SQL 1 本で書けるランナー「kSQL Flow」の紹介
+<!--
+title: kintone のバッチ処理を SQL 1 本で書けるランナー「kSQL Flow」の紹介
+tags:
+  - kintone
+  - SQL
+-->
 
 > **as-is / no support**: 本ツールは MIT ライセンスで現状有姿のまま公開しており、サポート・動作保証・修正の約束はありません。本番投入は必ず `--dry-run` とステージング検証を経て、自己責任でお願いします。
 
@@ -154,7 +159,23 @@ ksql-flow run -f jobs/monthly_sales_sync.sql --profile prod
 npm i -g @rex0220/ksql-flow   # Node.js 18+
 ```
 
-定期実行は好きな場所で: **GitHub Actions**（サーバーレスで無料枠運用）/ **Windows タスクスケジューラ**（社内サーバーの本命）/ **cron / Docker**。それぞれのセットアップ例はリポジトリの [examples/](https://github.com/rex0220/ksql-flow/tree/main/examples) にあります。
+### ログアプリの作成（初回のみ・約 1 分）
+
+「しくみ」の図に出てきた実行ログアプリは、**同梱のアプリテンプレートから作ります**。フィールド定義（分散ロック用の重複禁止設定まで）とレイアウト・一覧が設定済みです。
+
+1. [テンプレート zip](https://github.com/rex0220/ksql-flow/raw/main/template/ksql-flow-log-template1.zip) をダウンロード（npm でインストール済みならパッケージ内の `template/` にもあります）
+2. kintone システム管理 → アプリテンプレート → 読み込み → テンプレート「kSQL Flow 実行ログ」からアプリを作成
+3. 作成したアプリで API トークン（閲覧 + 追加 + 編集）を発行し、config の `logApp` に登録
+
+```bash
+ksql-flow validate --check-logapp --profile prod   # 定義が揃っているか機械検査
+```
+
+`--check-logapp` がフィールド・型・重複禁止・選択肢まで検査するので、手作業のズレがあってもここで捕まります。
+
+### 定期実行はお好みの場所で
+
+**GitHub Actions**（サーバーレスで無料枠運用）/ **Windows タスクスケジューラ**（社内サーバーの本命）/ **cron / Docker**。それぞれのセットアップ例はリポジトリの [examples/](https://github.com/rex0220/ksql-flow/tree/main/examples) にあります。
 
 詳細な仕様（実行モデル・ロック・リラン・ログ設計）は[公開仕様書](https://github.com/rex0220/ksql-flow/blob/main/docs/ksql_flow_spec.md)にまとめてあります。ちなみに開発は実装 AI と レビュー AI の 2 体制で行い、レビュー往復や実機検証の記録も[そのまま公開](https://github.com/rex0220/ksql-flow/tree/main/docs/internal)しています（この話もいつか書くかもしれません）。
 
@@ -165,4 +186,3 @@ npm i -g @rex0220/ksql-flow   # Node.js 18+
 3. **タスクスケジューラで毎朝動かす**: ②で作ったジョブを Windows で実運用へ（実機で踏んだ罠 2 連発つき）
 4. 以降、GitHub Actions / cron・Docker / AWS / Azure / GCP の環境別と、排他・冪等リランの設計深掘りを予定
 
-質問への回答はお約束できませんが（as-is）、感想・活用報告は歓迎です。
