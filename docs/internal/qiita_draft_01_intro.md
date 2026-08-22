@@ -188,7 +188,7 @@ batch/                            # 作業ディレクトリ（場所・名前�
         └── <batch_id>.jsonl      # ローカル実行ログ（ログアプリに書けない時の控えにも）
 ```
 
-### 1. ログアプリの作成（初回のみ・約 1 分）
+### 1. ログアプリの作成（初回のみ・約 3 分）
 
 「しくみ」の図に出てきた実行ログアプリは、**同梱のアプリテンプレートから作ります**。フィールド定義（分散ロック用の重複禁止設定まで）とレイアウト・一覧が設定済みです。
 
@@ -265,6 +265,10 @@ ksql-flow run -f jobs/monthly_deal_summary.sql --profile prod
 - VSCode ターミナルでの実行例
 
 ![image.png](https://qiita-image-store.s3.ap-northeast-1.amazonaws.com/0/100572/b10320b2-6a12-4a2a-a400-3867fae54659.png)
+
+- 実行ログ例
+
+![2026-08-22_18h26_46.png](https://qiita-image-store.s3.ap-northeast-1.amazonaws.com/0/100572/cd40ec57-ac4c-4ad9-91d7-e2f91b25a51b.png)
 
 
 ### 定期実行はお好みの場所で
