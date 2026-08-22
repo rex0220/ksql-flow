@@ -1,9 +1,13 @@
-# kSQL エンジンへの不具合報告: ASSERT の大小比較が辞書順比較になる
+# kSQL エンジンへの報告: ASSERT 大小比較の不具合（F-1）+ VALUES での as-of 関数許可の依頼（F-2）
 
 - 報告日: 2026-08-22
 - 報告元: kSQL Flow（ランナー）開発
 - 対象: `@rex0220/kintone-sql-tools` v3.71.0（`/flow` 公式 API 経由・dialect 1 スクリプトで確認）
-- 種別: 不具合（仕様との不一致）
+- 内容: F-1 = 不具合（仕様との不一致・優先度高）、F-2 = 機能依頼（優先度中）
+
+---
+
+# F-1（不具合）: ASSERT の大小比較が辞書順比較になる
 
 ## 現象
 
@@ -56,5 +60,38 @@ kSQL Flow 側の開発用ジョブでは、境界を 1 桁（`<= 5` 等）に抑
 
 Qiita 記事②（AI 連携編）用のテストデータ投入・クリーンアップジョブ（`dev/seed_test_deals.sql` / `dev/cleanup_test_deals.sql`）のモック E2E 検証中、`3 <= 10` のガードが AssertError になり発見。あわせて確認した関連事項（不具合ではないが記録）:
 
-- `INSERT ... VALUES` はリテラル限定のため `@TODAY()` 等の as-of 関数を書けない（KSQL1202）。`INSERT ... SELECT 定数, @TODAY() FROM <app> LIMIT 1` で回避可能。VALUES での as-of 関数許可は改善要望として検討いただけると、シード系スクリプトが素直に書ける
 - `DELETE` の WHERE に `LIKE` は使えない（WHERE_RESIDUAL エラー・仕様どおり）。完全一致 `IN` で回避
+
+---
+
+# F-2（機能依頼）: dialect 1 の `INSERT ... VALUES` で as-of 関数を許可
+
+## 現状
+
+`INSERT ... VALUES` の値はリテラル限定（数値・文字列・配列リテラル・CASE WHEN）で、dialect 1 の as-of 関数を書くと検証エラーになる:
+
+```sql
+-- @ksql dialect: 1
+INSERT INTO LAPP_案件管理 (会社名, 売上, 受注予定日)
+VALUES ('KSQL-FLOW-TEST-山田商事', 100000, @TODAY());
+-- → KSQL1202 INSERT の値には文字列・数値・配列リテラル・CASE WHEN が必要です
+```
+
+`CASE WHEN 1=1 THEN @TODAY() END` で包んでも通らない（実測）。
+
+## 依頼理由
+
+1. **メンタルモデルとの不一致**: dialect 1 の `@` 関数は「as-of からリテラル展開される」仕様であり、利用者の認識は定数。リテラルが書ける場所に書けないのは驚きになる。AI にジョブを生成させると高確率でこの形を書く（実際、記事②の作業で最初に踏んだ）
+2. **回避策が不自然**: 現行回避は `INSERT ... SELECT 定数, @TODAY() FROM <app> LIMIT 1` だが、①意図が読み取りにくい、②ソースアプリが空だと静かに 0 件挿入になる、③読取 API を 1 回余計に消費する
+3. **用途**: シード/フィクスチャ投入・バックフィル用データ作成など、日時を「バッチ基準時刻で」入れたい INSERT は今後も発生する
+
+## 仕様案
+
+- **対象は as-of 関数 4 つのみ**: `@NOW()` / `@TODAY()` / `@MONTH_START()` / `@NEXT_MONTH_START()`。一般式・bare 時刻関数（`NOW()` 等・as-of 非固定）は引き続き拒否
+- **dialect 1 限定**。dialect 0 の挙動・出力は 1 行も変えない
+- **意味論**: prepare 時に as-of からリテラル展開（既存の内部予約変数→変数解決と同一経路）。展開後は純粋な定数
+- **受入基準**: ①VALUES 内の 4 関数が実行・dry-run（previewStatement）・EXPLAIN の 3 面で同値に展開される ②同一バッチ内の全出現が同一 as-of ③dialect 0 では従来どおり KSQL1202
+
+## 修正までの小改善（任意）
+
+KSQL1202 のメッセージに「dialect 1 の as-of 関数は `INSERT ... SELECT` で注入してください」等のヒントを追記すると、修正リリース前でも利用者（特に AI）が自力で回避に辿り着ける。
