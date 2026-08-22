@@ -372,25 +372,28 @@ npm run validate -- -f jobs/monthly_deal_summary.sql --profile prod
 npm run dry-run -- -f jobs/monthly_deal_summary.sql --profile prod
 ```
 
-今回の実走は 0 件月だったので差分なしの正常スキップでしたが、対象がある月にはこんな差分が出ます（出力例）:
+シードでテストデータを入れた状態（前節）で流すと、こんな差分が出ます（抜粋）:
 
 ```
 [DRY-RUN] monthly_deal_summary.sql (as-of: 2026-08-22T00:00:00.000Z)
-  読み取り        : 276 件（API 5 回）
-  書き込み予定    : LAPP_顧客管理  INSERT 1 件 / UPDATE 1 件 / DELETE 0 件
+  書き込み予定    : LAPP_顧客管理  INSERT 0 件 / UPDATE 2 件 / DELETE 0 件
   変更サンプル（先頭 5 件）:
-    会社名=山田商事  当月売上合計: 1,200,000 → 1,450,000
-    会社名=鈴木建設  (新規) 当月売上合計: 380,000
+    LAPP_顧客管理  会社名=KSQL-FLOW-TEST-山田商事  当月案件件数:  → 2 / 当月売上合計:  → 150000
+    LAPP_顧客管理  会社名=KSQL-FLOW-TEST-鈴木建設  当月案件件数:  → 1 / 当月売上合計:  → 380000
   => dry-run 完了（kintone 書き込み 0 件）
 ```
 
-「山田商事が 145 万に更新され、鈴木建設が新規で入る。件数は 2 件」— この粒度なら、SQL を読めない人でも承認判断ができます。`ASSERT` や `EXIT SUCCESS IF` の判定は dry-run でも本実行と同じに効くので、業務異常があればこの段階で Exit 2 で止まります。
+「山田商事の集計欄が 2 件 / 150,000 で埋まり、鈴木建設が 1 件 / 380,000。更新は 2 件だけ」— この粒度なら、SQL を読めない人でも承認判断ができます。`ASSERT` や `EXIT SUCCESS IF` の判定は dry-run でも本実行と同じに効くので、業務異常があればこの段階で Exit 2 で止まります。
 
 問題なければ、人間が**自分のターミナル**（書込可トークンを OS 環境変数に設定してある側）で本実行します。AI に本実行させないのは運用ルールではなく構成です — AI 側の `.env` には書き込めるトークンがありません。
 
 ```bash
 npm run job -- -f jobs/monthly_deal_summary.sql --profile prod
 ```
+
+本実行後の顧客管理（KSQL-FLOW-TEST-山田商事）はこうなっています — dry-run の予告どおり、集計欄が 2 件 / 150,000 で埋まり、案件一覧には投入したテスト案件 2 件が並んでいます:
+
+![2026-08-22_23h47_03.png](https://qiita-image-store.s3.ap-northeast-1.amazonaws.com/0/100572/b106f817-208b-4d53-84fa-ba9dd8d069a9.png)
 
 ## ジョブは Git へ — AI の成果物を運用資産にする
 
