@@ -3,7 +3,7 @@
 - 起案日: 2026-08-23（起案: Claude Code、裁定: Takashi）
 - **R2**: 2026-08-23 — Codex レビュー（`reviews/scale_plan_codex_review_20260823.md`・BLOCKER 3 / MAJOR 11 / MINOR 4）を全件反映
 - 状態: **企画 R2**。S/M は着手可能。**L の読取系はエンジン現行版で実施可能** — F-3 回答（2026-08-23）で `maxRecords` が v3.69.0 から実装済みと判明（文書化漏れ）。前提は**ランナーの `limits.maxReadRows` 実装のみ**。L 設定は `maxReadRows: 25000` + `maxTempRows: 25000` の**両方**（エンジン回答 §3: 片方だけでは失敗点が移動する）
-- 対象: kSQL Flow v0.1.0 + kintone-sql-tools v3.72.0
+- 対象: kSQL Flow **v0.2.0**（`limits.maxReadRows` 実装済み・npm 公開済み 2026-08-23） + kintone-sql-tools v3.72.0
 - 実施場所: dev 環境（SFA パック 4245〜4249。実ドメインは記載しない）
 
 ## 0. R2 の主変更（レビュー対応の要点）
