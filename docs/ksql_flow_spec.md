@@ -440,7 +440,7 @@ kintone の API リクエスト数は **1 アプリあたり 1 日 10,000 回**�
 | `started_at` / `finished_at` | 開始/終了日時 | 日時 | 実行タイムスタンプ |
 | `duration_sec` | 所要時間(秒) | 数値 | 実行秒数 |
 | `read_count` | 取得件数 | 数値 | SELECT で取得した累計レコード数 |
-| `written_count` | 更新件数 | 数値 | INSERT / UPDATE / UPSERT されたレコード数 |
+| `written_count` | 更新件数 | 数値 | 書込系 DML が処理したレコード数の合算（INSERT の追加 + UPDATE の更新 + **DELETE の削除** + UPSERT の追加・更新。削除専用の集計フィールドは持たず、ここに含まれる） |
 | `last_written_key` | 最終書込キー | 文字列 | 診断情報: 最後に成功した書込チャンクの最終キー値（順序保証なし、→ 5.1）。単調な復旧ウォーターマークや途中再開位置には使用しない。キー値を取得できない操作ではチャンク情報のみ |
 | `api_calls` | API消費回数 | 数値 | 呼び出した kintone REST API の総回数 |
 | `executed_by` | 実行者 | 文字列 | 実行ユーザー / サービスアカウント名 |

@@ -157,3 +157,9 @@
 - **全 11 生成物が runner validate 合格**（構文・文数・スキーマ・dialect 検査）。フルモック E2E は 10 万件でモックのクエリ評価が遅く 10 分超のため断念 — **挙動の証明は L の E2E とモック=実機 API 一致実績で代替**（モック限定の制約であり実機性能とは無関係）
 - 実機の前提: limits `maxReadRows/maxTempRows 120,000・batchTimeoutSec 7200`・seed_run が CLI 上限/タイムアウトを自動付与（seed 見込み ≈ 30 分）・**API ≈ 5,000〜5,500/サイクル → 1 日 1 サイクル厳守**
 - 注目計測: 集計の所要時間（公表目標 10 分以内の判定）・RSS（L 147 MB → 推定 500〜700 MB・1GB 目安との比較）・IMPORT 6 MiB の実所要
+
+### 追記（2026-08-23・Takashi 指摘）: written_count と削除件数
+
+- ログアプリに削除件数の専用フィールドは無く、**DELETE の削除行数は written_count（ラベル「更新件数」）に合算される**のが実装仕様（executor.ts の dmlWrittenRows: INSERT+UPDATE+DELETE+UPSERT の処理行数合算）
+- 仕様書 8.2 の説明が「INSERT / UPDATE / UPSERT されたレコード数」と DELETE を記載漏れしていたため実装に合わせて修正（コミット済み）
+- 改善候補（POST 系・v0.3）: ①ラベル「更新件数」→「書込件数」への変更（logapp.ts + テンプレート zip + 既存アプリへの案内が必要なため今回は見送り）②内訳（inserted/updated/deleted）の別フィールド化または log_detail への記録
