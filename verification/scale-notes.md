@@ -163,3 +163,14 @@
 - ログアプリに削除件数の専用フィールドは無く、**DELETE の削除行数は written_count（ラベル「更新件数」）に合算される**のが実装仕様（executor.ts の dmlWrittenRows: INSERT+UPDATE+DELETE+UPSERT の処理行数合算）
 - 仕様書 8.2 の説明が「INSERT / UPDATE / UPSERT されたレコード数」と DELETE を記載漏れしていたため実装に合わせて修正（コミット済み）
 - 改善候補（POST 系・v0.3）: ①ラベル「更新件数」→「書込件数」への変更（logapp.ts + テンプレート zip + 既存アプリへの案内が必要なため今回は見送り）②内訳（inserted/updated/deleted）の別フィールド化または log_detail への記録
+
+### 追記（2026-08-23・v0.3.0 リリース後）: deleted_count の実機確認
+
+- dev 4249 に deleted_count 追加 + テンプレート zip v0.3 差し替え + v0.3.0 npm 公開後、SMOKE 1 サイクルで確認:
+  | ジョブ | written_count | deleted_count |
+  | --- | --- | --- |
+  | cleanup_1（11 件削除） | 11 | **11** |
+  | 集計（UPSERT 1 件） | 1 | 0 |
+  | verify / precheck | 0 | 0 |
+- 削除の独立記録・合算維持・フォーム判定（API +1）・ksql_version「flow 0.3.0」まで設計どおり。最終 precheck SUCCESS = 残存 0
+- 教訓: 初回検証時に dist の再ビルド漏れで「空欄」を観測（実装バグではなく手順ミス。typecheck / jest だけでなく build 後の dist 確認を実機前の手順に含めること）
