@@ -36,6 +36,7 @@ function notifyCapture(): { calls: Array<{ url: string; body: unknown }>; fetch:
 describe("run（受入基準 1: サンプルジョブ実行とログアプリ記録）", () => {
   test("正常実行: UPSERT が反映され JOB レコードが SUCCESS で残る", async () => {
     world = buildWorld({
+      withDeletedCount: true,
       orders: [
         { 顧客コード: "C0012", 金額: "100000", 受注日: "2026-08-05", ステータス: "受注完了" },
         { 顧客コード: "C0012", 金額: "50000", 受注日: "2026-08-10", ステータス: "受注完了" },
@@ -74,8 +75,60 @@ describe("run（受入基準 1: サンプルジョブ実行とログアプリ記
     expect(job.job_key_done).toBe("test:monthly_sales_sync");
     expect(job.as_of).toBe("2026-08-21T00:00:00Z");
     expect(Number(job.written_count)).toBe(2);
+    expect(Number(job.deleted_count)).toBe(0);
     expect(Number(job.api_calls)).toBeGreaterThan(0);
     expect(job.batch_id).not.toBe("");
+  });
+
+  test("DELETE は deleted_count に独立集計し written_count にも従来どおり含める", async () => {
+    world = buildWorld({
+      withDeletedCount: true,
+      customers: [
+        { 顧客コード: "C1", 当月売上実績: "100" },
+        { 顧客コード: "C2", 当月売上実績: "200" },
+      ],
+    });
+    const file = writeJob(world, "01_delete.sql", `-- @ksql dialect: 1
+DELETE FROM LAPP_顧客マスタ WHERE 当月売上実績 >= 100;
+`);
+    const code = await runCommand(world.profile, file, {
+      asOf: AS_OF,
+      baseFetch: world.mock.fetch,
+      out: world.out,
+    });
+
+    expect(code).toBe(EXIT.OK);
+    expect(customerRecords(world)).toHaveLength(0);
+    const job = logRecords(world)[0];
+    expect(Number(job.written_count)).toBe(2);
+    expect(Number(job.deleted_count)).toBe(2);
+  });
+
+  test("旧ログアプリでは deleted_count を送らず、フィールド取得と案内は 1 回だけ", async () => {
+    world = buildWorld({ customers: [{ 顧客コード: "C1", 当月売上実績: "100" }] });
+    const file = writeJob(world, "01_delete_legacy.sql", `-- @ksql dialect: 1
+DELETE FROM LAPP_顧客マスタ WHERE 顧客コード = 'C1';
+`);
+    const code = await runCommand(world.profile, file, {
+      asOf: AS_OF,
+      baseFetch: world.mock.fetch,
+      out: world.out,
+    });
+
+    expect(code).toBe(EXIT.OK);
+    expect(logRecords(world)[0].deleted_count).toBeUndefined();
+    const fieldGets = world.mock.requests.filter(
+      (request) => request.appId === 999 && request.method === "GET" && request.path.endsWith("/app/form/fields.json")
+    );
+    expect(fieldGets).toHaveLength(1);
+    const logWrites = world.mock.requests.filter(
+      (request) => request.appId === 999 && (request.method === "POST" || request.method === "PUT")
+    );
+    for (const request of logWrites) {
+      const serialized = JSON.stringify(request.body);
+      expect(serialized).not.toContain("deleted_count");
+    }
+    expect(world.output.filter((line) => line.includes("ログアプリに deleted_count がありません"))).toHaveLength(1);
   });
 
   test.each([0, 1, 100, 101])(

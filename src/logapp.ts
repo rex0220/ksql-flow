@@ -22,7 +22,8 @@ export const LOG_APP_FIELDS: Record<string, { type: string; label: string; uniqu
   finished_at: { type: "DATETIME", label: "終了日時" },
   duration_sec: { type: "NUMBER", label: "所要時間(秒)" },
   read_count: { type: "NUMBER", label: "取得件数" },
-  written_count: { type: "NUMBER", label: "更新件数" },
+  written_count: { type: "NUMBER", label: "書込件数" },
+  deleted_count: { type: "NUMBER", label: "削除件数" },
   last_written_key: { type: "SINGLE_LINE_TEXT", label: "最終書込キー" },
   api_calls: { type: "NUMBER", label: "API消費回数" },
   executed_by: { type: "SINGLE_LINE_TEXT", label: "実行者" },
@@ -34,6 +35,7 @@ export const LOG_APP_FIELDS: Record<string, { type: string; label: string; uniqu
 };
 
 const LOG_FIELD_CODES = Object.keys(LOG_APP_FIELDS);
+export const OPTIONAL_LOG_APP_FIELD_CODES: ReadonlySet<string> = new Set(["deleted_count"]);
 
 /** kintone 複数行文字列の実効上限（8.3: 約 65,535 字。安全側に切り詰める） */
 const DETAIL_HEAD = 40000;
@@ -79,12 +81,43 @@ export interface RunningRecord {
  * すべてランナー共通の HTTP 層（単一 API カウンタ）経由で行う。
  */
 export class LogAppClient {
+  private deletedCountSupport: Promise<boolean> | null = null;
+
   constructor(
     private readonly client: FlowKintoneClient,
     readonly appId: number,
     private readonly jsonl: JsonlLogger,
-    private readonly pending: PendingQueue
+    private readonly pending: PendingQueue,
+    private readonly out: (line: string) => void = () => undefined
   ) {}
+
+  /**
+   * v0.2 以前のテンプレートには deleted_count がないため、初回書込前に一度だけ判定する。
+   * Promise 自体をキャッシュし、並行する書込や取得失敗時にも追加 API を発生させない。
+   */
+  private async writableFields(fields: LogRecordFields): Promise<LogRecordFields> {
+    if (this.deletedCountSupport === null) {
+      this.deletedCountSupport = this.client
+        .getFields(this.appId)
+        .then((definitions) => {
+          const supported = definitions.some((field) => field.code === "deleted_count");
+          if (!supported) {
+            this.out("  情報: ログアプリに deleted_count がありません（テンプレート v0.3 で追加。任意）");
+          }
+          return supported;
+        })
+        // 判定失敗でログ書込全体を巻き添えにしない。安全側 = 送らない（旧アプリ互換）に倒し、
+        // reject をキャッシュしない（reject のままだと以後の全書込が pending 退避に堕ちる）
+        .catch((error) => {
+          this.out(`  情報: ログアプリのフィールド判定に失敗したため deleted_count は送信しません (${errorMessage(error)})`);
+          return false;
+        });
+    }
+    if (await this.deletedCountSupport) return fields;
+    const compatible = { ...fields };
+    delete compatible.deleted_count;
+    return compatible;
+  }
 
   /** job_key を持つ RUNNING レコードを探す（ロック競合・stale 判定用） */
   async findByJobKey(jobKey: string): Promise<RunningRecord | null> {
@@ -140,9 +173,10 @@ export class LogAppClient {
       params.onStaleRecovered?.(existing);
     }
     try {
+      const fields = await this.writableFields({ ...params.fields, job_key: params.jobKey, status: "RUNNING" });
       const result = await this.client.postRecords({
         app: this.appId,
-        records: [toKintoneRecord({ ...params.fields, job_key: params.jobKey, status: "RUNNING" })],
+        records: [toKintoneRecord(fields)],
       });
       return result.ids[0];
     } catch (error) {
@@ -217,18 +251,20 @@ export class LogAppClient {
   }
 
   async update(recordId: string, fields: LogRecordFields): Promise<void> {
+    const compatible = await this.writableFields(fields);
     await this.client.putRecords({
       app: this.appId,
-      records: [{ id: Number(recordId), record: toKintoneRecord(fields) }],
+      records: [{ id: Number(recordId), record: toKintoneRecord(compatible) }],
     });
   }
 
   /** ロックを伴わない INSERT（SKIPPED 記録等）。失敗時は再送キューへ */
   async insertRecord(fields: LogRecordFields): Promise<string | null> {
     try {
+      const compatible = await this.writableFields(fields);
       const result = await this.client.postRecords({
         app: this.appId,
-        records: [toKintoneRecord(fields)],
+        records: [toKintoneRecord(compatible)],
       });
       return result.ids[0];
     } catch (error) {
@@ -244,7 +280,8 @@ export class LogAppClient {
     for (const { file, op } of this.pending.list()) {
       try {
         if (op.op === "insert") {
-          await this.client.postRecords({ app: this.appId, records: [toKintoneRecord(op.fields as LogRecordFields)] });
+          const compatible = await this.writableFields(op.fields as LogRecordFields);
+          await this.client.postRecords({ app: this.appId, records: [toKintoneRecord(compatible)] });
         } else if (op.recordId !== undefined) {
           await this.update(op.recordId, op.fields as LogRecordFields);
         }

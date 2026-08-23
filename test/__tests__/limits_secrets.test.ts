@@ -18,7 +18,7 @@ const ORDERS = [{ 顧客コード: "C1", 金額: "100", 受注日: "2026-08-05",
 describe("上限制御（受入基準 7）", () => {
   test("limits.maxApiCalls 超過で安全停止 (Exit 3)。カウントにログ・ロック分が含まれる", async () => {
     world = buildWorld({ orders: ORDERS });
-    // ロック GET(1) + RUNNING INSERT(1) の直後に尽きる値 → 本体実行の最初の API で停止
+    // ロック確認 GET(1) + フィールド定義 GET(1) + RUNNING INSERT(1) で上限に達する
     world.profile.limits.maxApiCalls = 3;
     const file = writeJob(world, "01_monthly.sql", SAMPLE_JOB);
     const code = await runCommand(world.profile, file, {
@@ -28,11 +28,13 @@ describe("上限制御（受入基準 7）", () => {
     });
     expect(code).toBe(EXIT.RUNTIME);
     expect(world.output.join("\n")).toContain("maxApiCalls");
-    // ロック分 2 回 + 本体 1 回 = 3 回で停止（4 回目は発行されない）
+    // 初回書込前のフィールド取得を含む 3 回で停止（4 回目は発行されない）
     expect(world.mock.requests.length).toBe(3);
-    // ロック操作（ログアプリ GET + POST）がカウントに含まれている
+    // ロック操作と app/form/fields 取得が同じ上限カウンタに含まれている
     expect(world.mock.requests[0].appId).toBe(999);
     expect(world.mock.requests[1].appId).toBe(999);
+    expect(world.mock.requests[1].path).toContain("/app/form/fields.json");
+    expect(world.mock.requests[2].appId).toBe(999);
   });
 
   test("--max-api-calls が config より優先される", async () => {

@@ -255,7 +255,18 @@ describe("init-logapp / --check-logapp（設計書 付録 B）", () => {
     expect(world.output.join("\n")).toContain("password");
   });
 
-  test("--check-logapp: 定義が揃っていれば OK", async () => {
+  test("--check-logapp: deleted_count があれば型を検査して OK", async () => {
+    world = buildWorld({ withDeletedCount: true });
+    const code = await checkLogAppCommand(world.profile, {
+      baseFetch: world.mock.fetch,
+      out: world.out,
+    });
+    expect(code).toBe(EXIT.OK);
+    expect(world.output.join("\n")).toContain("OK");
+    expect(world.output.join("\n")).not.toContain("任意フィールド deleted_count が未追加");
+  });
+
+  test("--check-logapp: deleted_count がなくても案内付きで OK", async () => {
     world = buildWorld({});
     const code = await checkLogAppCommand(world.profile, {
       baseFetch: world.mock.fetch,
@@ -263,6 +274,18 @@ describe("init-logapp / --check-logapp（設計書 付録 B）", () => {
     });
     expect(code).toBe(EXIT.OK);
     expect(world.output.join("\n")).toContain("OK");
+    expect(world.output.join("\n")).toContain("任意フィールド deleted_count が未追加");
+  });
+
+  test("--check-logapp: deleted_count が NUMBER 以外なら NG", async () => {
+    world = buildWorld({ withDeletedCount: true });
+    world.mock.app(LOG_APP).def.fields.deleted_count.type = "SINGLE_LINE_TEXT";
+    const code = await checkLogAppCommand(world.profile, {
+      baseFetch: world.mock.fetch,
+      out: world.out,
+    });
+    expect(code).toBe(EXIT.VALIDATION);
+    expect(world.output.join("\n")).toContain('フィールド "deleted_count" のタイプ');
   });
 
   test("--check-logapp: job_key の重複禁止がないと NG (Exit 1)", async () => {

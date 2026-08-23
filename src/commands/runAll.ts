@@ -350,6 +350,7 @@ export async function runAllCommand(
         duration_sec: Math.round((finishedAt.getTime() - startedAt.getTime()) / 1000),
         read_count: outcomes.reduce((sum, outcome) => sum + outcome.readCount, 0),
         written_count: outcomes.reduce((sum, outcome) => sum + outcome.writtenCount, 0),
+        deleted_count: outcomes.reduce((sum, outcome) => sum + outcome.deletedCount, 0),
         api_calls: env.http.snapshot(),
         error_message: env.masker.mask(
           outcomes
@@ -435,6 +436,7 @@ function skippedOutcome(job: JobFile, reason: string): JobOutcome {
     skipReason: reason,
     readCount: 0,
     writtenCount: 0,
+    deletedCount: 0,
     apiCalls: 0,
     detailLines: [],
   };

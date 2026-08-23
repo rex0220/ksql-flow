@@ -33,6 +33,8 @@ export interface JobOutcome {
   finishedAt?: Date;
   readCount: number;
   writtenCount: number;
+  /** DELETE で削除した件数（writtenCount の内数） */
+  deletedCount: number;
   apiCalls: number;
   lastWrittenKey?: string;
   /** ASSERT WARNING 等、log_detail へ残す行 */

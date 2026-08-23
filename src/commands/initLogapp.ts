@@ -1,6 +1,6 @@
 import { ResolvedProfile } from "../config";
 import { ConfigError, errorMessage } from "../errors";
-import { expectedLogFieldCodes, LOG_APP_FIELDS } from "../logapp";
+import { expectedLogFieldCodes, LOG_APP_FIELDS, OPTIONAL_LOG_APP_FIELD_CODES } from "../logapp";
 import { createRunnerEnv } from "../runner";
 import { EXIT, ExitCode } from "../types";
 
@@ -88,6 +88,10 @@ export async function checkLogAppCommand(
   for (const [code, def] of Object.entries(LOG_APP_FIELDS)) {
     const actual = byCode.get(code);
     if (actual === undefined) {
+      if (OPTIONAL_LOG_APP_FIELD_CODES.has(code)) {
+        out(`  情報: 任意フィールド ${code} が未追加です`);
+        continue;
+      }
       out(`  NG: フィールド "${code}" (${def.label}) がありません (期待タイプ: ${def.type})`);
       problems += 1;
       continue;

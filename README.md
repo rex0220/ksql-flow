@@ -169,17 +169,18 @@ ksql-flow run-all jobs --profile stg --dry-run --json > dry-run.json
 | --- | --- | --- |
 | config | `schema/ksql.config.schema.json` のキー・型・未知キー拒否、extends / env / null semantics、`notifications.heartbeat.on` の値域 `success \| always`（既定 `success`） | 解決後の `ResolvedProfile` オブジェクト、validator 実装 |
 | CLI / Exit | command、command 別 flag allowlist、排他・dry-run 専用制約、Exit 0〜5 | parser 実装、人間向け文言・装飾 |
-| ログアプリ | [公開仕様書 §8.2](docs/ksql_flow_spec.md) の 22 field code/type、`record_type` 2 値、`status` 7 値、`job_key` unique、JOB/BATCH 関係。`log_detail` の **`SKIPPED (` 前方一致**と理由 `filtered` / `LOCKED` の意味 | label・layout・view、prefix 後方の人間向け文言。上記以外の理由文字列（`dependency: x` / `stop-on-error` / `batch-timeout` 等）は情報提供であり追加され得る |
+| ログアプリ | [公開仕様書 §8.2](docs/ksql_flow_spec.md) の必須 22 field code/type + 任意の `deleted_count`、`record_type` 2 値、`status` 7 値、`job_key` unique、JOB/BATCH 関係。`log_detail` の **`SKIPPED (` 前方一致**と理由 `filtered` / `LOCKED` の意味 | label・layout・view、prefix 後方の人間向け文言。上記以外の理由文字列（`dependency: x` / `stop-on-error` / `batch-timeout` 等）は情報提供であり追加され得る |
 | `--json` | dry-run の `DRY_RUN` / `DRY_RUN_BATCH` exact shape と top-level `formatVersion: 1`。field 追加は additive、破壊変更は version 繰上げ | 通常 run の JSON（v0.1 では `--json` 自体を拒否） |
 | JSONL | 全行の `{ v: 1, ts, event, batchId, profile }` envelope、安定 event `write_chunk` / `statement` / `job_start` / `job_finish` / `batch_start` / `batch_finish` / `dry_run_*` | その他の内部 event と payload（best-effort）、安定 event payload への additive field |
 | state | `.ksql/state-<profile>.json`、`schemaVersion: 1`、破損・未知 version の警告 fallback | jobs の内部 cache shape、手動編集 |
-| template | `template/ksql-flow-log-template1.zip`、22 field / unique / 選択肢のログアプリ契約 | layout・view・label の UX |
+| template | `template/ksql-flow-log-template1.zip`、必須 22 field / unique / 選択肢のログアプリ契約（v0.3.0 の任意 `deleted_count` は手動追加） | layout・view・label の UX |
 
 `DRY_RUN` の top-level field は `formatVersion, kind, job, profile, asOf, status, exitCode, sampleLimit, reads, writes, actualApiCalls, samples, gate?, incomplete, error?`、`DRY_RUN_BATCH` は `formatVersion, kind, warning, exitCode, jobs` です。完全な nested shape と変更規則は [公開仕様書 §10.2](docs/ksql_flow_spec.md) を参照してください。
 
 ## ログアプリと排他制御
 
 * 実行のたびに kintone ログアプリへ BATCH / JOB の親子レコードを記録します（フィールド定義は [公開仕様書 §8.2](docs/ksql_flow_spec.md)。**同梱の [アプリテンプレート](template/README.md) から作成するのが最も簡単**で、レイアウト・一覧も設定済みです）。
+* `written_count`（書込件数）は INSERT / UPDATE / UPSERT / DELETE の合算です。v0.3.0 以降は、任意の数値フィールド `deleted_count` をログアプリへ追加すると、その内訳となる DELETE の削除件数も JOB / BATCH に記録します。旧アプリに未追加でも実行は継続します。
 * `job_key`（重複禁止フィールド）への RUNNING レコード先行 INSERT が分散ロックです。終了時に `job_key` はクリアされ `job_key_done` へ退避します。ハング時は `ksql-flow unlock`（同一 profile の全 RUNNING が対象で、解除前に一覧表示）。
 * kintone 標準通知は次の 2 条件を設定します: (1) `record_type = BATCH` かつ status が FAILED 系（`FAILED` / `ABORTED` / `TIMEOUT`）、(2) `record_type = JOB` かつ `parent_batch_id` が空、かつ status が FAILED 系。run-all は BATCH で 1 通に集約し、単発 run の失敗は JOB 条件で拾います。
 * ログアプリへ書けない障害時は、ローカル `.ksql/logs/<batch_id>.jsonl` と再送キューへの保存を可能な限り行います。保存失敗時は stderr へ警告し、実行は継続します。

@@ -93,6 +93,35 @@ describe("run-all（設計書 4 章 / 10.3）", () => {
     }
   });
 
+  test("BATCH の deleted_count は JOB の削除件数を合算する", async () => {
+    world = buildWorld({
+      withDeletedCount: true,
+      customers: [
+        { 顧客コード: "C1", 当月売上実績: "100" },
+        { 顧客コード: "C2", 当月売上実績: "200" },
+      ],
+    });
+    writeJob(world, "01_delete.sql", `-- @ksql name: delete_customers
+-- @ksql dialect: 1
+DELETE FROM LAPP_顧客マスタ WHERE 当月売上実績 >= 100;
+`);
+    writeJob(world, "02_read.sql", JOB_C_INDEPENDENT);
+    const code = await runAllCommand(world.profile, world.jobsDir, {
+      asOf: AS_OF,
+      baseFetch: world.mock.fetch,
+      out: world.out,
+    });
+
+    expect(code).toBe(EXIT.OK);
+    const logs = logRecords(world);
+    const deletedJob = logs.find((row) => row.script_name === "01_delete.sql");
+    const batch = logs.find((row) => row.record_type === "BATCH");
+    expect(Number(deletedJob?.written_count)).toBe(2);
+    expect(Number(deletedJob?.deleted_count)).toBe(2);
+    expect(Number(batch?.written_count)).toBe(2);
+    expect(Number(batch?.deleted_count)).toBe(2);
+  });
+
   test("依存先の失敗 → 依存ジョブのみ SKIPPED・独立ジョブは実行される（既定）", async () => {
     world = buildWorld({ orders: ORDERS });
     writeJob(world, "01_a.sql", JOB_FAIL); // job_a が ABORTED
@@ -437,6 +466,7 @@ describe("Exit Code 集約（受入基準 6: 10.3 の全ケース）", () => {
     skipReason,
     readCount: 0,
     writtenCount: 0,
+    deletedCount: 0,
     apiCalls: 0,
     detailLines: [],
   });

@@ -67,7 +67,7 @@ export function createRunnerEnv(profile: ResolvedProfile, options: CreateEnvOpti
   const client = createKintoneClient(engineClientConfig(profile, http));
   const logApp =
     profile.logApp !== undefined
-      ? new LogAppClient(client, profile.apps[profile.logApp].id, jsonl, pending)
+      ? new LogAppClient(client, profile.apps[profile.logApp].id, jsonl, pending, out)
       : null;
 
   return {

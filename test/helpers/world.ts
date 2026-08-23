@@ -25,6 +25,7 @@ export function buildWorld(options: {
   logRecords?: Array<Record<string, string>>;
   customerUnique?: boolean;
   withLogApp?: boolean;
+  withDeletedCount?: boolean;
   profilePatch?: Partial<ResolvedProfile>;
 } = {}): TestWorld {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ksql-flow-it-"));
@@ -100,6 +101,7 @@ export function buildWorld(options: {
         duration_sec: { type: "NUMBER" },
         read_count: { type: "NUMBER" },
         written_count: { type: "NUMBER" },
+        ...(options.withDeletedCount === true ? { deleted_count: { type: "NUMBER" } } : {}),
         last_written_key: { type: "SINGLE_LINE_TEXT" },
         api_calls: { type: "NUMBER" },
         executed_by: { type: "SINGLE_LINE_TEXT" },

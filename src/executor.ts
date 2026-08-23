@@ -110,6 +110,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
       finishedAt: new Date(),
       readCount: 0,
       writtenCount: 0,
+      deletedCount: 0,
       apiCalls: 0,
     };
   }
@@ -162,6 +163,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
   // チェックポイント（v3.70.0 onChunkWritten。キー値は順序保証のない診断情報）
   let writeChunks = 0;
   let chunkRows = 0;
+  let deletedChunkRows = 0;
   let lastWrittenKey: string | undefined;
   let lastCheckpointChunks = 0;
   let lastCheckpointAt = Date.now();
@@ -169,6 +171,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
     if (env.logApp !== null && info.appId === env.logApp.appId) return; // ログアプリ自身の書込は対象外
     writeChunks += 1;
     chunkRows += info.records;
+    if (info.operation === "DELETE") deletedChunkRows += info.records;
     const diagnosticKey = maskLastKeyValue(env, job, info);
     if (diagnosticKey !== undefined) lastWrittenKey = diagnosticKey;
     env.jsonl.append("write_chunk", {
@@ -191,6 +194,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
       const id = recordId;
       const fields: LogRecordFields = {
         written_count: chunkRows,
+        deleted_count: deletedChunkRows,
         last_written_key: lastWrittenKey ?? `chunk:${writeChunks}`,
         api_calls: env.http.snapshot() - apiCallsBefore,
       };
@@ -204,6 +208,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
   let errorText: string | undefined;
   let readCount = 0;
   let writtenCount = 0;
+  let deletedCount = 0;
   let context: ExecutionContext | null = null;
   try {
     context = createExecutionContext({
@@ -227,6 +232,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
       const result = await executeStatement(statement, context);
       const statementMetrics = metricsDelta(result.metrics, previousMetrics);
       const statementWrittenCount = writtenRows(result);
+      const statementDeletedCount = deletedRows(result);
       previousMetrics = result.metrics;
       readCount += statementMetrics.fetchedRows;
       recordStatementDetail(env, job, index, result, detailLines);
@@ -244,6 +250,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
         error: result.error ? env.masker.mask(result.error.message) : null,
       });
       writtenCount += statementWrittenCount;
+      deletedCount += statementDeletedCount;
       if (result.status === "success") {
         if (result.kind === "EXIT_NO_DATA") sawNoData = true;
         continue;
@@ -304,6 +311,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
   const apiCallsJob = env.http.snapshot() - apiCallsBefore;
   // 成功文の公開 DML 結果と、失敗文を含む成功済み callback 件数の大きい方が実書込数。
   const actualWrittenCount = Math.max(writtenCount, chunkRows);
+  const actualDeletedCount = Math.max(deletedCount, deletedChunkRows);
   const maskedError = errorText !== undefined ? env.masker.mask(errorText) : undefined;
 
   if (recordId !== null && env.logApp !== null) {
@@ -312,6 +320,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
       duration_sec: Math.round((finishedAt.getTime() - startedAt.getTime()) / 1000),
       read_count: readCount,
       written_count: actualWrittenCount,
+      deleted_count: actualDeletedCount,
       last_written_key: writeChunks > 0 ? lastWrittenKey ?? `chunk:${writeChunks}` : "",
       api_calls: env.http.snapshot() - apiCallsBefore,
       error_message: maskedError ?? "",
@@ -325,6 +334,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
     exitCode,
     readCount,
     writtenCount: actualWrittenCount,
+    deletedCount: actualDeletedCount,
     apiCalls: env.http.snapshot() - apiCallsBefore,
     error: maskedError ?? null,
   });
@@ -337,6 +347,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
     finishedAt,
     readCount,
     writtenCount: actualWrittenCount,
+    deletedCount: actualDeletedCount,
     apiCalls: apiCallsJob,
     lastWrittenKey: writeChunks > 0 ? lastWrittenKey ?? `chunk:${writeChunks}` : undefined,
   };
@@ -367,6 +378,11 @@ function dmlWrittenRows(result: FlowDmlResult): number {
     case "UPSERT":
       return result.insertedCount + result.updatedCount;
   }
+}
+
+function deletedRows(result: StatementResult): number {
+  if (!isDmlResult(result.result) || result.result.type !== "DELETE") return 0;
+  return result.result.deletedCount;
 }
 
 function isTimeoutError(result: StatementResult): boolean {
