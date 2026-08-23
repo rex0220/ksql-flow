@@ -36,7 +36,7 @@ tags:
 
 ```
 C:\ksql\my-ksql-jobs\        ← ジョブリポジトリを clone（private）
-├── run_batch.bat            ← 本記事で追加する起動バッチ（下記）
+├── run_batch.bat            ← 起動バッチ（テンプレートに同梱 — 追加作業なし）
 ├── ksql.config.json
 ├── .env                     ← このサーバー用の書込可トークン（.gitignore 済み）
 ├── jobs\
@@ -44,18 +44,38 @@ C:\ksql\my-ksql-jobs\        ← ジョブリポジトリを clone（private）
 └── node_modules\@rex0220\ksql-flow\   ← npm install で入るランナー
 ```
 
-サーバー側の準備は `git clone` → `npm install` →（後述の）`.env` 配置の 3 手。無人化の前提となる 3 点 — 二重起動が Exit 5 で止まる・通知が届く・非対話シェルで動く — は #3 の無人運用ゲートで確認済みという状態から始めます。
+### サーバー構築（約 15 分・タスク登録前まで）
 
-起動には **ASCII だけの .bat** を使います（[examples/windows-task-scheduler/run_batch.bat](https://github.com/rex0220/ksql-flow/blob/main/examples/windows-task-scheduler/run_batch.bat)）:
+1. サーバーに Node.js 20.6+ を導入
+2. ジョブリポジトリを clone して依存を入れる（private のため要認証。GitHub CLI なら）:
+
+   ```powershell
+   gh repo clone <あなたのアカウント>/my-ksql-jobs C:\ksql\my-ksql-jobs
+   cd C:\ksql\my-ksql-jobs
+   npm install
+   ```
+
+3. `.env.example` をコピーして `.env` を作り、このサーバー用の**書込可トークン**を貼る（理由は次節）
+4. 疎通確認 → **起動バッチを手動で 1 回**流して、タスクに載せる前にコマンド自体を検証:
+
+   ```powershell
+   node --env-file=.env node_modules\@rex0220\ksql-flow\dist\cli.js validate --check-logapp --profile prod
+   .\run_batch.bat
+   $LASTEXITCODE   # 0 = 成功（対象 0 件の NO_DATA を含む）
+   ```
+
+無人化の前提となる 3 点 — 二重起動が Exit 5 で止まる・通知が届く・非対話シェルで動く — は #3 の無人運用ゲートで確認済みという状態から始めます。
+
+起動バッチは**テンプレートに同梱**されています（[run_batch.bat](https://github.com/rex0220/ksql-flow-template/blob/main/run_batch.bat)）:
 
 ```bat
 @echo off
-cd /d C:\ksql\my-ksql-jobs
+cd /d %~dp0
 node --env-file=.env node_modules\@rex0220\ksql-flow\dist\cli.js run-all .\jobs --profile prod
 exit /b %ERRORLEVEL%
 ```
 
-こだわりが 2 つ入っています。**.ps1 でなく .bat** なのは後述の罠②を構造的に回避するため。**`npm run` を挟まず node を直接叩く**のは、ランナーの Exit Code をそのまま `LastTaskResult` に届けるため（npm のラッパーを経由させると終了コードの対応が崩れる余地が生まれます）。
+こだわりが 3 つ入っています。**.ps1 でなく ASCII だけの .bat** なのは後述の罠②を構造的に回避するため。**`cd /d %~dp0`（バッチ自身のあるディレクトリへ移動）**なのは、clone 先がどこでも書き換えなしで動かすため — 罠①（パス依存）もこれで半減します。**`npm run` を挟まず node を直接叩く**のは、ランナーの Exit Code をそのまま `LastTaskResult` に届けるため（npm のラッパーを経由させると終了コードの対応が崩れる余地が生まれます）。
 
 ### 無人実行のトークン設計 — サーバーでは `.env` に一本化
 
