@@ -32,7 +32,7 @@ tags:
 
 ## 前提と構成 — 動かすのは「#2 で作ったあのリポジトリ」
 
-載せるのは新しい何かではありません。[#2](https://qiita.com/rex0220/items/3a1213a596a8c49b67aa) でテンプレートから作り、AI がジョブを書き、[#3](https://qiita.com/rex0220/items/62e950ab1ccc5b54ff69) で 10 万件まで鍛えた**あなたのジョブリポジトリそのもの**です。ジョブ SQL・config・npm 依存（ランナー本体も `node_modules` 内）が 1 リポジトリに揃っているので、**サーバーへのデプロイは `git clone`、更新は `git pull`** — それだけです。
+載せるのは新しい何かではありません。[#2](https://qiita.com/rex0220/items/3a1213a596a8c49b67aa) でテンプレートから作り、AI がジョブを書き、[#3](https://qiita.com/rex0220/items/62e950ab1ccc5b54ff69) で 10 万件まで鍛えた**あなたのジョブリポジトリそのもの**です。ジョブ SQL・config・npm 依存（ランナー本体も `node_modules` 内）が 1 リポジトリに揃っているので、**サーバーへの初回配置は `git clone` + `npm install`、以降のジョブ更新は基本 `git pull`** — サーバー固有の手作業コピーは不要です。
 
 ```
 C:\ksql\my-ksql-jobs\        ← ジョブリポジトリを clone（private）
