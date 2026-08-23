@@ -2,10 +2,12 @@
 
 このプロジェクトの主な変更を記録します。
 
-## [Unreleased]
+## [0.3.0] - 2026-08-23
 
 - ログアプリに任意の `deleted_count`（削除件数）を追加し、JOB / BATCH ごとの DELETE 件数を記録。`written_count` は削除を含む従来の合算を維持し、表示名を「書込件数」に変更。
 - 旧テンプレート製ログアプリでは `deleted_count` を送信せず、情報表示のみで互換動作するようにした。`validate --check-logapp` でも同フィールドは任意として検査。
+- ログアプリの `ksql_version` が package.json のバージョンに追随するよう修正（v0.2.0 でも「flow 0.1.0」と記録されていた表示漏れ）。
+- 同梱アプリテンプレートを v0.3 版（deleted_count 追加・「書込件数」ラベル）に更新。
 
 ## [0.2.0] - 2026-08-23
 
@@ -24,5 +26,6 @@
 - `--check-logapp` の選択肢集合検査、template 契約テスト、Node 18 / npm pack install smoke CI、unlock 対象一覧表示を追加。
 - clientCert / proxy と validate の推定 API 消費・所要時間表示を v0.1 非対応として明記。
 
+[0.3.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.3.0
 [0.2.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.2.0
 [0.1.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.1.0
