@@ -30,34 +30,46 @@ tags:
 
 つまりスケジューラの役割は「**決まった時刻に 1 コマンド叩く装置**」だけに絞ります。
 
-## 前提と構成
+## 前提と構成 — 動かすのは「#2 で作ったあのリポジトリ」
 
-ジョブと設定は #1（手作り最小構成）でも #2（テンプレートリポジトリ）でも構いません。無人化の前提となる 3 点 — 二重起動が Exit 5 で止まる・通知が届く・非対話シェルで動く — は #3 の無人運用ゲートで確認済みという状態から始めます。
+載せるのは新しい何かではありません。[#2](https://qiita.com/rex0220/items/3a1213a596a8c49b67aa) でテンプレートから作り、AI がジョブを書き、[#3](https://qiita.com/rex0220/items/62e950ab1ccc5b54ff69) で 10 万件まで鍛えた**あなたのジョブリポジトリそのもの**です。ジョブ SQL・config・npm 依存（ランナー本体も `node_modules` 内）が 1 リポジトリに揃っているので、**サーバーへのデプロイは `git clone`、更新は `git pull`** — それだけです。
+
+```
+C:\ksql\my-ksql-jobs\        ← ジョブリポジトリを clone（private）
+├── run_batch.bat            ← 本記事で追加する起動バッチ（下記）
+├── ksql.config.json
+├── .env                     ← このサーバー用の書込可トークン（.gitignore 済み）
+├── jobs\
+│   └── monthly_deal_summary.sql
+└── node_modules\@rex0220\ksql-flow\   ← npm install で入るランナー
+```
+
+サーバー側の準備は `git clone` → `npm install` →（後述の）`.env` 配置の 3 手。無人化の前提となる 3 点 — 二重起動が Exit 5 で止まる・通知が届く・非対話シェルで動く — は #3 の無人運用ゲートで確認済みという状態から始めます。
 
 起動には **ASCII だけの .bat** を使います（[examples/windows-task-scheduler/run_batch.bat](https://github.com/rex0220/ksql-flow/blob/main/examples/windows-task-scheduler/run_batch.bat)）:
 
 ```bat
 @echo off
-cd /d C:\ksql\project
-ksql-flow run-all .\jobs\ --profile prod
-if %ERRORLEVEL% GEQ 1 exit /b %ERRORLEVEL%
+cd /d C:\ksql\my-ksql-jobs
+node --env-file=.env node_modules\@rex0220\ksql-flow\dist\cli.js run-all .\jobs --profile prod
+exit /b %ERRORLEVEL%
 ```
 
-.ps1 でなく .bat なのは好みではありません — **後述の罠②を構造的に回避するため**です。
+こだわりが 2 つ入っています。**.ps1 でなく .bat** なのは後述の罠②を構造的に回避するため。**`npm run` を挟まず node を直接叩く**のは、ランナーの Exit Code をそのまま `LastTaskResult` に届けるため（npm のラッパーを経由させると終了コードの対応が崩れる余地が生まれます）。
 
-### 無人実行のトークン設計
+### 無人実行のトークン設計 — サーバーでは `.env` に一本化
 
-[#2](https://qiita.com/rex0220/items/3a1213a596a8c49b67aa) では「書込トークンはセッション限定・恒久的な環境変数にしない」としました。あれは**AI が同居する開発機**の分離設計です。無人実行するサーバーでは前提が変わります — 人間のセッションが無いので、**タスクを実行するアカウントの環境変数**に `KSQL_TOKEN_*` を置きます。
+[#2](https://qiita.com/rex0220/items/3a1213a596a8c49b67aa) では「書込トークンはセッション限定・恒久的な環境変数にしない」としました。あれは**AI が同居する開発機**の分離設計です。無人サーバーでは前提が変わります — このマシンに AI のセッションはなく、人間のセッションすらありません。そこで**リポジトリ内の `.env`（.gitignore 済み）に書込可トークンを置き**、起動バッチの `--env-file=.env` に読ませます。
 
-- 推奨は**バッチ専用の実行アカウント**（人が普段使わない）を作り、そのユーザー環境変数に設定。トークンの露出面がそのアカウントに閉じます
-- 開発機と運用サーバーを兼ねる場合（今回の検証環境がそうです）は、AI ツールを使うユーザーと実行アカウントを分けることが #2 の分離を保つ条件になります
+- トークンの露出面が「このサーバーの、このディレクトリ」に閉じ、実行アカウントのユーザー環境変数にも残りません（ログオン種別による環境変数の読み込みの癖からも自由になります）
+- 開発機と運用サーバーを兼ねる場合（今回の検証環境がそうです）だけは #2 の分離が課題に戻ります — AI ツールを使うユーザーと、タスクの実行アカウント + `.env` を分けてください
 
 ## タスク登録（動作確認済み）
 
 登録も PowerShell 1 発です（[examples/windows-task-scheduler/register_task.ps1](https://github.com/rex0220/ksql-flow/blob/main/examples/windows-task-scheduler/register_task.ps1)）:
 
 ```powershell
-$batchPath = "C:\ksql\project\run_batch.bat"   # 絶対パスで（後述の罠①）
+$batchPath = "C:\ksql\my-ksql-jobs\run_batch.bat"   # 絶対パスで（後述の罠①）
 $taskName  = "kSQL Flow daily batch"
 
 $action    = New-ScheduledTaskAction -Execute $batchPath -WorkingDirectory (Split-Path $batchPath)
@@ -121,6 +133,17 @@ LastTaskResult : 0
 
 これは他の環境でも同じで、GitHub Actions や EventBridge でも「スケジューラ側リトライは 0」が本連載の原則です。
 
+## 変更フロー — AI が書き、Git が運び、朝が実行する
+
+運用が回り始めたあとのジョブ変更も、#2 で作った流れがそのまま使えます。
+
+1. 開発機で AI にジョブの修正・新規作成を依頼（スキーマ確認 → 生成 → 二段 validate → dry-run まで AI が自走）
+2. dry-run の差分を人間がレビューして PR → merge
+3. サーバーで `git pull`（ランナーや依存の更新があれば `npm install` も）
+4. **翌朝から新しいジョブが動く**
+
+サーバーには手作業のコピーも設定変更も発生しません。ジョブは Git 履歴に、実行結果は kintone のログアプリに残るので、「いつ誰が何を変え、いつどう動いたか」が両側から追えます。AI が書いた SQL が、レビューと Git を通って毎朝の実運用に届く — 連載でやってきたことの終着点がこの 4 手です。
+
 ## 残る穴 — 「起動しなかった」だけは拾えない
 
 最後にもう一度正直に。ランナーがどれだけ装備を持っても、**スケジューラがそもそも起動しなかった事故**（サーバー停止・Windows Update 再起動・タスク無効化）はランナーには観測できません。手当ては heartbeat です — 成功時にも Webhook を打つ設定にしておき、「**毎朝来るはずの通知が来ない**」ことを検知の頼りにします。通知チャネル側の仕組み（Slack のリマインダーや外部監視）で「不在」を拾えるならなお良し。ここを自動化しきれないことが、タスクスケジューラ運用の受け入れるべき限界です。
@@ -128,6 +151,7 @@ LastTaskResult : 0
 ## まとめ
 
 - スケジューラは「定時に 1 コマンド叩く装置」に格下げし、通知・記録・排他・リランはランナーが持つ — この分担なら現実解として成立する
+- 動かすのは #2 のテンプレートから作ったジョブリポジトリそのもの。**デプロイ = `git clone` / 更新 = `git pull`**。ジョブの変更は「AI に依頼 → dry-run レビュー → PR → pull → 翌朝反映」の 4 手で回る
 - 罠は 2 つ実機で踏んだ: **絶対パス以外は登録するな**（0xFFFD0000）、**日本語 .ps1 は BOM 付きで**（5.1 の ANSI 解釈で 0.1 秒無言死）。ASCII の .bat 起動が最も構造的に安全
 - `LastTaskResult` = Exit Code の一次判定、詳細は kintone のログアプリ。**「ログアプリに記録が無い = CLI 未到達」**が切り分けの武器になる
 - 自動再起動は使わず、復旧は冪等リラン `--resume` に一本化

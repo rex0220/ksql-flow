@@ -14,7 +14,7 @@
 # NOTE: do NOT enable "restart on failure" on the task. Reruns are handled by
 #       "ksql-flow run-all --resume" (idempotent, guarded by the duplicate-run lock).
 
-$batchPath = "C:\ksql\project\run_batch.bat"   # <- absolute path to your copy
+$batchPath = "C:\ksql\my-ksql-jobs\run_batch.bat"   # <- absolute path to your copy (jobs repo from ksql-flow-template)
 $taskName  = "kSQL Flow daily batch"
 
 $action    = New-ScheduledTaskAction -Execute $batchPath -WorkingDirectory (Split-Path $batchPath)
@@ -22,7 +22,7 @@ $trigger   = New-ScheduledTaskTrigger -Daily -At 6:00
 $settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 # Interactive = runs while the user is logged on. For unattended servers, switch to
 # a dedicated account with "Run whether user is logged on or not" (password stored)
-# or a gMSA, and make sure that account has the KSQL_TOKEN_* environment variables.
+# or a gMSA. Tokens are read from .env inside the repo, so no per-account env vars are needed.
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force
