@@ -53,4 +53,13 @@
 
 ## 実機記録（ここから下に追記していく）
 
-（未実施）
+### SMOKE-1 回目（2026-08-23 昼・**不合格 → 対処済み**）
+
+- 実行: my-ksql-jobs の Claude Code セッション（詳報: my-ksql-jobs `docs/scale_smoke_report.md`）
+- seed（CLI IMPORT）: **exit 0・3.6 秒**（顧客 1 INSERT + 案件 10 INSERT — IMPORT の疎通・capability gate・カンマ結合トークン併送・config 互換すべて成立）
+- 集計: SUCCESS（読取 14 / 書込 1 / API 9）
+- 突合: **ABORTED（exit 2）** — 原因はロジックではなく**環境残存**（Phase 0 の CUSTOMER-001 + DEAL 260 件、記事 #2 の 山田商事/鈴木建設 + 案件A/B/C が名前空間に残存）。ASSERT が環境異常を正しく検出した実例
+- 対処（恒久）: **precheck.sql（seed 前の残存 0 件チェック）を生成器に追加**・手順の先頭に組込み（モック 3 ケース検証済み）。一過性の残存は `cleanup_legacy.sql` で一掃（Takashi 承認）
+- 収穫（改善候補）: ①ランナーのコンソール出力に経過時間がない（ログアプリ duration_sec はあるが一次記録に不便 — POST 系候補）②auto 権限モードでは書込 CLI が止まるため、検証セッションは settings.local.json の許可ルールを事前準備（レポート運用メモ参照）
+
+### SMOKE-2 回目（再実行待ち — cleanup_legacy → cleanup_1 → precheck → seed から）

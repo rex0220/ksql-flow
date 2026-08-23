@@ -126,6 +126,7 @@ UPSERT の事前 GET は 50 キー/回、cleanup の ID 取得読取・metadata�
 ## 6. 手順
 
 0. **準備**: 固定 as-of 決定 → `verification/scale-notes.md` の**記録スキーマを先に作る**（batch_id とスクショ・一次ログの対応付け） → 突合 SQL 確定 + validate → シード 10 件スモーク（§3.2 の前提全確認）
+0'. **precheck（各段階の seed 直前に必須）**: `out/<tier>/precheck.sql` で `KSQL-FLOW-TEST-` 名前空間の残存 0 件を確認（非 0 なら停止して片付け）。検証期間中はこの名前空間を本検証が専有する — SMOKE 1 回目で他世代残存による突合誤検出が実際に発生（scale-notes 参照）
 1. 各段階の定型: seed → 件数確認 → EXPLAIN 記録 → dry-run（プレフィックス外 0 件確認込み） → 本実行（計測 3 回・§4-3） → 突合 → 同一 as-of 再実行（観点 7） → cleanup → 記録
 2. S では境界値補助ケース（観点 8）を追加
 3. L では集計系（L-9/L-10）→ 書込大ジョブ（チェックポイント観測 → L-11 ①② → L-12）の順
