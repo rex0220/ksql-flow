@@ -47,32 +47,31 @@ C:\ksql\my-ksql-jobs\        ← ジョブリポジトリを clone（private）
 しくみの全体像は 1 枚にするとこうです（失敗通知と変更フローの詳細は後述）:
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph dev["開発機（#2 の構成）"]
         AI["VSCode + Claude Code<br>ジョブ作成 → dry-run"]
     end
-    subgraph gh["GitHub（private）"]
-        REPO["ジョブリポジトリ<br>jobs/*.sql + config + run_batch.bat"]
-    end
+    REPO["GitHub（private）<br>jobs/*.sql + config + run_batch.bat"]
     subgraph srv["社内 Windows サーバー"]
         TS["タスクスケジューラ<br>毎朝 6:00・自動再起動なし"]
         BAT["run_batch.bat<br>%~dp0 基準で node を直接起動"]
-        RUN["ksql-flow run-all<br>トークンは .env（このサーバー限り）"]
+        RUN["ksql-flow run-all<br>トークンは .env"]
+        TS --> BAT --> RUN
+        RUN -.->|"Exit Code = LastTaskResult"| TS
     end
     subgraph kin["kintone"]
         APPS["業務アプリ<br>読取・書込"]
-        LOG["実行ログアプリ<br>BATCH / JOB 記録・分散ロック"]
+        LOG["実行ログアプリ<br>BATCH / JOB・分散ロック"]
         NTF["条件通知（2 条件）"]
+        LOG --> NTF
     end
     GRP["ジョブ管理グループ<br>ポータル・メール・モバイル"]
 
     AI -->|"PR → merge"| REPO
     REPO -->|"git clone / pull"| srv
-    TS --> BAT --> RUN
     RUN --> APPS
     RUN -->|"実行記録・status"| LOG
-    RUN -.->|"Exit Code = LastTaskResult"| TS
-    LOG --> NTF -->|"失敗時"| GRP
+    NTF -->|"失敗時"| GRP
     RUN -.->|"任意: Webhook（Slack 等）"| HOOK["外部通知"]
 ```
 
