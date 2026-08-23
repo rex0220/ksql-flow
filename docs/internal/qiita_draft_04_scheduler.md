@@ -65,7 +65,7 @@ flowchart TB
         NTF["条件通知（2 条件）"]
         LOG --> NTF
     end
-    GRP["ジョブ管理グループ<br>ポータル・メール・モバイル"]
+    GRP["ジョブ管理グループ<br>ポータル・メール"]
 
     AI -->|"PR → merge"| REPO
     REPO -->|"git clone / pull"| srv
