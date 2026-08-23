@@ -165,7 +165,8 @@ UPSERT の事前 GET は 50 キー/回、cleanup の ID 取得読取・metadata�
 | --- | --- | --- |
 | F-4 | 大量削除の押し下げ支援 | **不成立で確定（起票不要）** — 会社名 IN のバッチ分割方式が XL（DELETE 11 万件・8.8 分）まで機能 |
 | F-5 | kintone `bulkRequest` 対応（書込 API を最大 1/20 に） | **充足 → 起票済み（2026-08-23）** — XL 実測で UPDATE 10 万件 = 44.6 分が支配項と確定。`docs/kSQLエンジンへの依頼-20260823-F5-bulkRequest.md` |
-| — | IMPORT capability gate の有効化手段 | S 前スモークで dev 環境の有効化が**機能しない**場合に相談（エンジン変更ではなく設定の想定） |
+| — | IMPORT capability gate の有効化手段 | ~~S 前スモークで確認~~ → **機能確認済み（起票不要）** |
+| F-6 | DML 候補取得の長大クエリ対応（GET → POST/X-HTTP-Method-Override 等） | 実測で kintone 入口 nginx が URL ≈8KB 超を 414/431 拒否（単文 UPDATE 実験）。**実務で大量 IN 指定が要件化した場合のみ**起票（現行は分割 or 押し下げ可能条件で設計回避可能） |
 
 ## 10. Qiita 記事設計（連載 #3 として公開）
 
