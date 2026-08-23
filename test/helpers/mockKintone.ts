@@ -412,15 +412,18 @@ export function applyQuery(
   let limit: number | undefined;
   let offset = 0;
 
-  const limitMatch = wherePart.match(/\blimit\s+(\d+)\s*$/i);
-  if (limitMatch) {
-    limit = Number(limitMatch[1]);
-    wherePart = wherePart.slice(0, limitMatch.index).trim();
-  }
+  // kintone クエリ文法は `... order by X limit N offset M` の順なので、末尾から
+  // offset → limit の順に剥がす（逆順だと offset が後置された時に limit が末尾一致せず
+  // 黙って消え、500 件超のページングが全件返しになる — M 段階の E2E で実際に発生）
   const offsetMatch = wherePart.match(/\boffset\s+(\d+)\s*$/i);
   if (offsetMatch) {
     offset = Number(offsetMatch[1]);
     wherePart = wherePart.slice(0, offsetMatch.index).trim();
+  }
+  const limitMatch = wherePart.match(/\blimit\s+(\d+)\s*$/i);
+  if (limitMatch) {
+    limit = Number(limitMatch[1]);
+    wherePart = wherePart.slice(0, limitMatch.index).trim();
   }
   const orderMatch = wherePart.match(/\border\s+by\s+(.+)$/i);
   if (orderMatch) {
