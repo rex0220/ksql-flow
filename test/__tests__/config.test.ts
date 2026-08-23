@@ -46,6 +46,19 @@ describe("loadConfig", () => {
     // 既定値
     expect(profile.retry.maxAttempts).toBe(5);
     expect(profile.limits.batchTimeoutSec).toBe(3600);
+    expect(profile.limits.maxReadRows).toBeNull();
+  });
+
+  test.each([1, 200000])("limits.maxReadRows の境界値 %i を受理する", (maxReadRows) => {
+    const config = structuredClone(BASE) as Record<string, any>;
+    config.profiles.prod.limits = { maxReadRows };
+    expect(loadConfig({ configPath: writeConfig(config) }).limits.maxReadRows).toBe(maxReadRows);
+  });
+
+  test.each([0, 200001, 1.5, "100"])("limits.maxReadRows の不正値 %p を拒否する", (maxReadRows) => {
+    const config = structuredClone(BASE) as Record<string, any>;
+    config.profiles.prod.limits = { maxReadRows };
+    expect(() => loadConfig({ configPath: writeConfig(config) })).toThrow(ConfigError);
   });
 
   test.each([

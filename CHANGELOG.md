@@ -13,5 +13,6 @@
 - dry-run JSON に `formatVersion: 1`、JSONL に `v: 1` / batchId / profile 共通 envelope を追加し、state の profile 別 path と警告 fallback を公開契約化。
 - `--check-logapp` の選択肢集合検査、template 契約テスト、Node 18 / npm pack install smoke CI、unlock 対象一覧表示を追加。
 - clientCert / proxy と validate の推定 API 消費・所要時間表示を v0.1 非対応として明記。
+- `limits.maxReadRows`（1〜200,000）を追加し、通常実行と dry-run の文単位読取候補上限を設定可能化。
 
 [0.1.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.1.0

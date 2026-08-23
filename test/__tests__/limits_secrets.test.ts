@@ -179,7 +179,7 @@ KEY (顧客コード);
       baseUrl: "https://x",
       auth: { type: "password", username: "u", password: "p@ssw0rd-long" },
       apps: { a: { id: 1, tokens: ["tok-1234567890"] } },
-      limits: { maxApiCalls: null, maxTempRows: null, batchTimeoutSec: null },
+      limits: { maxApiCalls: null, maxReadRows: null, maxTempRows: null, batchTimeoutSec: null },
       retry: { maxAttempts: 1, initialDelayMs: 1, maxDelayMs: 1, respectRetryAfter: true },
       notifications: {},
       logging: { localDir: ".", maskFields: [], stripLiterals: false },

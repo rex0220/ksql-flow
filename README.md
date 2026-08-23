@@ -159,6 +159,7 @@ ksql-flow run-all jobs --profile stg --dry-run --json > dry-run.json
 * `extends` は接続設定・`limits`・`retry` 等を継承しますが、**`apps` と `logApp` は継承しません**（stg のつもりが prod を更新する事故の構造的防止。各プロファイルで明示定義が必要）。
 * `apps.<名前>.tokens` は 1 アプリ複数トークン対応（カンマ結合で送信・上限 9 個）。リクエストごとに対象アプリのトークンのみ送信します。lookup 書込時は参照元アプリの閲覧トークンも同じ `tokens` に含めます。
 * `limits.maxApiCalls` は**ログアプリへの書き込み・ロック操作・リトライの各試行を含む** HTTP リクエスト数の単一カウンタで判定します。
+* `limits.maxReadRows` は文単位の読取候補行数上限（1〜200,000、未指定時はエンジン既定の 10,000）です。引き上げる場合は、一時テーブル実体化で失敗点が移動しないよう `limits.maxTempRows` も同じ規模に揃えてください。
 * `notifications.onFailure.webhook`: FAILED / ABORTED / TIMEOUT 時に汎用 JSON を POST（`NO_DATA` では通知しません）。`notifications.heartbeat.on` は `success`（既定。`SUCCESS` / `NO_DATA` の Exit 0 完了時）または `always`（失敗を含む毎実行の完了時）を指定します。
 * config の公開契約の正は [JSON Schema](schema/ksql.config.schema.json) です。未知キーは全階層で ConfigError（Exit 1）になります。
 

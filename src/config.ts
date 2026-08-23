@@ -20,6 +20,7 @@ export interface RetryConfig {
 
 export interface LimitsConfig {
   maxApiCalls: number | null;
+  maxReadRows: number | null;
   maxTempRows: number | null;
   batchTimeoutSec: number | null;
 }
@@ -72,6 +73,7 @@ export const DEFAULT_RETRY: RetryConfig = {
 
 export const DEFAULT_LIMITS: LimitsConfig = {
   maxApiCalls: null,
+  maxReadRows: null,
   maxTempRows: null,
   batchTimeoutSec: 3600,
 };
@@ -201,7 +203,7 @@ function validateAppsKeys(value: unknown, ctx: string): void {
 }
 
 function validateLimitsKeys(value: unknown, ctx: string): void {
-  assertKnownKeys(value, ["maxApiCalls", "maxTempRows", "batchTimeoutSec"], ctx);
+  assertKnownKeys(value, ["maxApiCalls", "maxReadRows", "maxTempRows", "batchTimeoutSec"], ctx);
 }
 
 function validateRetryKeys(value: unknown, ctx: string): void {
@@ -452,8 +454,13 @@ function resolveLimits(raw: unknown, ctx: string): LimitsConfig {
     }
     return item;
   };
+  const maxReadRows = positiveOrNull("maxReadRows");
+  if (maxReadRows !== null && maxReadRows > 200_000) {
+    throw new ConfigError("limits.maxReadRows は 1〜200000 の整数で指定してください");
+  }
   return {
     maxApiCalls: positiveOrNull("maxApiCalls"),
+    maxReadRows,
     maxTempRows: positiveOrNull("maxTempRows"),
     batchTimeoutSec: positiveOrNull("batchTimeoutSec"),
   };

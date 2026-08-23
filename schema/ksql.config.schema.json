@@ -92,6 +92,7 @@
       "additionalProperties": false,
       "properties": {
         "maxApiCalls": { "type": ["integer", "null"], "minimum": 1 },
+        "maxReadRows": { "type": ["integer", "null"], "minimum": 1, "maximum": 200000 },
         "maxTempRows": { "type": ["integer", "null"], "minimum": 1 },
         "batchTimeoutSec": { "type": ["integer", "null"], "minimum": 1 }
       }

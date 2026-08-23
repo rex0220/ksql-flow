@@ -25,6 +25,7 @@
   },
   "limits": {
     "maxApiCalls": 5000,
+    "maxReadRows": 200000,
     "maxTempRows": 200000,
     "batchTimeoutSec": 3600
   },

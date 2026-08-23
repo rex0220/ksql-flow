@@ -129,6 +129,9 @@ export async function dryRunJob(
         asOf,
         ...(env.profile.timezone !== undefined ? { timezone: env.profile.timezone } : {}),
         ...(job.timeoutSec !== null ? { timeoutMs: job.timeoutSec * 1000 } : {}),
+        ...(env.profile.limits.maxReadRows !== null
+          ? { maxRecords: env.profile.limits.maxReadRows }
+          : {}),
         ...(env.profile.limits.maxTempRows !== null
           ? { tempTableMaxRows: env.profile.limits.maxTempRows }
           : {}),

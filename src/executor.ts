@@ -210,6 +210,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
       asOf,
       ...(env.profile.timezone !== undefined ? { timezone: env.profile.timezone } : {}),
       ...(params.timeoutMs !== null ? { timeoutMs: params.timeoutMs } : {}),
+      ...(env.profile.limits.maxReadRows !== null ? { maxRecords: env.profile.limits.maxReadRows } : {}),
       ...(env.profile.limits.maxTempRows !== null ? { tempTableMaxRows: env.profile.limits.maxTempRows } : {}),
       onChunkWritten,
     });
