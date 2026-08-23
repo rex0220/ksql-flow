@@ -182,7 +182,7 @@ ksql-flow run-all jobs --profile stg --dry-run --json > dry-run.json
 * 実行のたびに kintone ログアプリへ BATCH / JOB の親子レコードを記録します（フィールド定義は [公開仕様書 §8.2](docs/ksql_flow_spec.md)。**同梱の [アプリテンプレート](template/README.md) から作成するのが最も簡単**で、レイアウト・一覧も設定済みです）。
 * `written_count`（書込件数）は INSERT / UPDATE / UPSERT / DELETE の合算です。v0.3.0 以降は、任意の数値フィールド `deleted_count` をログアプリへ追加すると、その内訳となる DELETE の削除件数も JOB / BATCH に記録します。旧アプリに未追加でも実行は継続します。
 * `job_key`（重複禁止フィールド）への RUNNING レコード先行 INSERT が分散ロックです。終了時に `job_key` はクリアされ `job_key_done` へ退避します。ハング時は `ksql-flow unlock`（同一 profile の全 RUNNING が対象で、解除前に一覧表示）。
-* kintone 標準通知は次の 2 条件を設定します: (1) `record_type = BATCH` かつ status が FAILED 系（`FAILED` / `ABORTED` / `TIMEOUT`）、(2) `record_type = JOB` かつ `parent_batch_id` が空、かつ status が FAILED 系。run-all は BATCH で 1 通に集約し、単発 run の失敗は JOB 条件で拾います。
+* kintone 標準通知は次の 2 条件を設定します: (1) `record_type = BATCH` かつ status が FAILED 系（`FAILED` / `ABORTED` / `TIMEOUT`）、(2) `record_type = JOB` かつ `parent_batch_id` が空、かつ status が FAILED 系。run-all は BATCH で 1 通に集約し、単発 run の失敗は JOB 条件で拾います。宛先は「ジョブ管理」等のグループ宛を推奨します（担当変更をグループのメンバー管理だけで反映でき、通知設定を触りません）。
 * ログアプリへ書けない障害時は、ローカル `.ksql/logs/<batch_id>.jsonl` と再送キューへの保存を可能な限り行います。保存失敗時は stderr へ警告し、実行は継続します。
 * `logging.stripLiterals: true` でログ上の SQL からリテラル値を除去。認証情報はいかなるログ・エラーにも出力されません。
 
