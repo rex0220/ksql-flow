@@ -48,7 +48,10 @@ export interface RunJobParams {
   jobKey: string;
 }
 
-export const RUNNER_VERSION = "0.1.0";
+// package.json の version を正とする（ハードコードだと npm version 更新に追随できず、
+// v0.2.0 リリース後もログアプリに「flow 0.1.0」が記録される表示漏れが実機検証で発覚した）
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+export const RUNNER_VERSION: string = (require("../package.json") as { version: string }).version;
 
 type ExecutionMetrics = StatementResult["metrics"];
 
