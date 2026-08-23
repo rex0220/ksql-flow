@@ -13,8 +13,11 @@ describe("配布ログアプリテンプレート契約", () => {
     const template = JSON.parse(entry!.getData().toString("utf8")) as any;
     const fields = Object.values(template.apps[0].schema.table.fieldList) as any[];
     const byCode = new Map(fields.filter((field) => LOG_APP_FIELDS[field.var] !== undefined).map((field) => [field.var, field]));
-    const requiredCodes = Object.keys(LOG_APP_FIELDS).filter((code) => !OPTIONAL_LOG_APP_FIELD_CODES.has(code));
-    expect([...byCode.keys()].sort()).toEqual(requiredCodes.sort());
+    // 同梱テンプレート(v0.3+)は任意フィールド(deleted_count)も含む完全形。
+    // 「任意」の緩和は旧テンプレート製の既存アプリ(check-logapp / 実行時判定)向けであり、
+    // 配布物自体は全フィールドを持つことを契約とする
+    expect([...byCode.keys()].sort()).toEqual(Object.keys(LOG_APP_FIELDS).sort());
+    expect([...OPTIONAL_LOG_APP_FIELD_CODES].every((code) => byCode.has(code))).toBe(true);
 
     const templateType: Record<string, string> = {
       SINGLE_SELECT: "DROP_DOWN",
