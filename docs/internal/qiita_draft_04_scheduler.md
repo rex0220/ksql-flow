@@ -97,6 +97,8 @@ flowchart TB
 
 無人化の前提となる 3 点 — 二重起動が Exit 5 で止まる・通知が届く・非対話シェルで動く — は #3 の無人運用ゲートで確認済みという状態から始めます。
 
+> **再現検証済み**: 本記事の手順は、**素の Windows 11 Pro**（M1 Mac 上の Parallels Desktop 仮想マシン）で VSCode・Git・GitHub CLI・Node のインストールから通しで実施し、ログアプリに BATCH / JOB が記録されるところまで確認しています。スナップショットで「何も入っていない Windows」に戻して検証できるため、開発機に何かが入っている前提の手順抜けはありません。
+
 起動バッチは**テンプレートに同梱**されています（[run_batch.bat](https://github.com/rex0220/ksql-flow-template/blob/main/run_batch.bat)）:
 
 ```bat
