@@ -432,12 +432,12 @@ npm run job -- -f jobs/monthly_deal_summary.sql --profile prod
 
 ## 次回
 
-このジョブを **Windows タスクスケジューラで毎朝動かします**。実機検証で踏んだ「PowerShell が 0.1 秒で無言死する罠」を含む運用編です。
+このジョブを **Windows タスクスケジューラで毎朝動かします**。実機検証で踏んだ「PowerShell が 0.1 秒で無言死する罠」を含む運用編です → [【kSQL Flow #4】タスクスケジューラで毎朝動かす](https://qiita.com/rex0220/items/d0a66c133edd42ff91c4)。
 
 ## 今後の連載予定
 
 1. **#1**: [kintone のバッチ処理を SQL 1 本で書けるランナーの紹介](https://qiita.com/rex0220/items/893ab4016a5aaf595642)
 2. **#2（本記事）**: AI エージェントにジョブを書かせる（MCP + 二段 validate + dry-run レビュー）
 3. **#3**: [毎朝の無人実行の前に — kintone バッチを 200 → 20,000 → 100,000 件で鍛える](https://qiita.com/rex0220/items/62e950ab1ccc5b54ff69)
-4. **#4**: タスクスケジューラで毎朝動かす — 実機で踏んだ罠 2 連発つき
-5. 以降、GitHub Actions / cron・Docker / AWS / Azure / GCP の環境別と、排他・冪等リランの設計深掘りを予定
+4. **#4**: [タスクスケジューラで毎朝動かす — PowerShell が 0.1 秒で無言死する罠つき](https://qiita.com/rex0220/items/d0a66c133edd42ff91c4)
+5. 以降、GitHub Actions / cron・Docker / レンタルサーバー / Google Cloud の環境別と、排他・冪等リランの設計深掘りを予定

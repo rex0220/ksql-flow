@@ -283,6 +283,6 @@ ksql-flow run -f jobs/monthly_deal_summary.sql --profile prod
 1. **#1（本記事）**: 紹介とコンセプト
 2. **#2 [AI エージェントに kintone のバッチジョブを書かせる — MCP + Claude Code](https://qiita.com/rex0220/items/3a1213a596a8c49b67aa)**: スキーマを MCP から取得して SQL を生成 → validate 二段構え → dry-run を人間の最終レビューにする
 3. **#3 [毎朝の無人実行の前に — kintone バッチを 200 → 20,000 → 100,000 件で鍛える](https://qiita.com/rex0220/items/62e950ab1ccc5b54ff69)**: 実測・強制切断・API 枯渇まで意図的に踏み抜く検証編
-4. **#4 タスクスケジューラで毎朝動かす**: 鍛えたジョブを Windows で実運用へ（実機で踏んだ罠 2 連発つき）
-5. 以降、GitHub Actions / cron・Docker / AWS / Azure / GCP の環境別と、排他・冪等リランの設計深掘りを予定
+4. **#4 [タスクスケジューラで毎朝動かす — PowerShell が 0.1 秒で無言死する罠つき](https://qiita.com/rex0220/items/d0a66c133edd42ff91c4)**: 鍛えたジョブを Windows で実運用へ
+5. 以降、GitHub Actions / cron・Docker / レンタルサーバー / Google Cloud の環境別と、排他・冪等リランの設計深掘りを予定
 
