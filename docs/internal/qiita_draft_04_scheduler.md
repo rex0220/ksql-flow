@@ -75,7 +75,7 @@ flowchart TB
     RUN -.->|"任意: Webhook（Slack 等）"| HOOK["外部通知"]
 ```
 
-### サーバー構築（約 15 分・タスク登録前まで）
+### サーバー構築 — タスク登録前まで
 
 1. サーバーに Node.js 20.6+ を導入
 2. ジョブリポジトリを clone して依存を入れる（private のため要認証。GitHub CLI なら）:
@@ -142,7 +142,7 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Se
 Get-ScheduledTaskInfo -TaskName "kSQL Flow daily batch" | Format-List LastRunTime,LastTaskResult
 ```
 
-`LastTaskResult` は **kSQL Flow の Exit Code がそのまま入ります**（0 = 成功 / 2 = 業務異常 / 3 = 実行時エラー / 5 = 多重起動）。そして詳細は kintone のログアプリ側 — 何件読んで何件書いたか・エラー全文・実行時刻は、サーバーに入らなくても kintone を開けば見えます。
+`LastTaskResult` には、本記事の構成 — タスクが .bat を直接起動し、.bat が `exit /b %ERRORLEVEL%` で返す — なら **kSQL Flow の Exit Code がそのまま入ります**（0 = 成功 / 2 = 業務異常 / 3 = 実行時エラー / 5 = 多重起動。実機確認済み）。そして詳細は kintone のログアプリ側 — 何件読んで何件書いたか・エラー全文・実行時刻は、サーバーに入らなくても kintone を開けば見えます。
 
 ### スケジュール起動そのものを確認してから本番時刻へ
 
@@ -193,7 +193,7 @@ LastTaskResult : 4294770688
 PowerShell 5.1 で直接実行して再現させた結果、原因はエンコーディングでした。
 
 - 起動スクリプト（日本語コメント入り .ps1）が **BOM なし UTF-8** だった
-- **タスクから起動していたのは Windows PowerShell 5.1（`powershell.exe`）**。5.1 は BOM なし UTF-8 を **ANSI として読む**ため、日本語リテラルが化けてパースエラー → 何も出力せず即死
+- **タスクから起動していたのは Windows PowerShell 5.1（`powershell.exe`）**。5.1 は BOM なし UTF-8 を **ANSI として読む**ため、日本語リテラルが化けてパースエラー → 何も出力せず即死（この挙動は [Microsoft の文字エンコーディング仕様](https://learn.microsoft.com/ja-jp/powershell/module/microsoft.powershell.core/about/about_character_encoding)に明記されています — BOM が無い場合、Windows PowerShell は既定で ANSI コードページと解釈します）
 - 手元の確認で通っていたのは **pwsh 7**（UTF-8 既定）だったから。「手で動くのにタスクだと死ぬ」の正体がこれ
 
 対策は 3 択です: **①日本語を含む .ps1 は UTF-8 BOM 付きで保存**する、②起動スクリプトを **ASCII だけの .bat** にする（本記事の構成。エンコーディング問題が構造的に消えます）、③タスクの実行プログラムを pwsh 7 に明示する。ちなみに examples の登録スクリプトのコメントを英語にしてあるのは、この罠を仕組みで避けるためです。
@@ -222,6 +222,8 @@ LastTaskResult : 0
 
 1. `record_type = BATCH` かつ status が `FAILED` / `ABORTED` / `TIMEOUT` のいずれか — run-all の失敗を **1 通に集約**
 2. `record_type = JOB` かつ `parent_batch_id` が**空** かつ status が同上 — **単発 run の失敗**を拾う
+
+**必須の設定はこの 2 つだけ**です。以降は **推奨**（固定文の書き方・レコードタイトル・グループ宛・メール通知の前提）と**追加の保険**（Webhook / heartbeat）の順に説明します。
 
 ランナーは終了時にレコードの status を書き換えるので、失敗の瞬間に kintone がポータル・メール・モバイルアプリへ通知します。
 
