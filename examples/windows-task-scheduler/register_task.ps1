@@ -30,5 +30,12 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Se
 # Verify after the first run:
 #   Get-ScheduledTaskInfo -TaskName "kSQL Flow daily batch" | Format-List LastRunTime,LastTaskResult
 #   (LastTaskResult maps 1:1 to ksql-flow exit codes: 0=success, 2=assert, 3=runtime, 5=locked)
+#
+# TIP: to verify the *scheduled* trigger path itself (manual Start-ScheduledTask
+#      does not test it), register with a trigger a few minutes ahead:
+#        $trigger = New-ScheduledTaskTrigger -Daily -At (Get-Date).AddMinutes(5)
+#      wait for it to fire, check LastTaskResult = 0, then switch to the
+#      production time without re-registering:
+#        Set-ScheduledTask -TaskName "kSQL Flow daily batch" -Trigger (New-ScheduledTaskTrigger -Daily -At 6:00)
 # Remove:
 #   Unregister-ScheduledTask -TaskName "kSQL Flow daily batch" -Confirm:$false

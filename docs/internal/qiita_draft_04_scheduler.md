@@ -144,6 +144,22 @@ Get-ScheduledTaskInfo -TaskName "kSQL Flow daily batch" | Format-List LastRunTim
 
 `LastTaskResult` は **kSQL Flow の Exit Code がそのまま入ります**（0 = 成功 / 2 = 業務異常 / 3 = 実行時エラー / 5 = 多重起動）。そして詳細は kintone のログアプリ側 — 何件読んで何件書いたか・エラー全文・実行時刻は、サーバーに入らなくても kintone を開けば見えます。
 
+### スケジュール起動そのものを確認してから本番時刻へ
+
+`Start-ScheduledTask` による手動実行はコマンドの検証にはなりますが、**「時刻トリガーで発火する」経路の検証にはなりません**（罠①はまさに、手動では通るのにスケジュール起動で死ぬ型の事故です）。そこで初回は **数分後の時刻で登録して自然発火を待ち**、確認できてから本番時刻に切り替えます:
+
+```powershell
+# 1. 登録時のトリガーだけ数分後にしておく（上のスクリプトのこの行を差し替え）
+$trigger = New-ScheduledTaskTrigger -Daily -At (Get-Date).AddMinutes(5)
+
+# 2. 発火後、LastRunTime が今の時刻・LastTaskResult = 0 を確認（+ ログアプリに BATCH レコード）
+
+# 3. トリガーを本番時刻へ変更（登録し直し不要）
+Set-ScheduledTask -TaskName "kSQL Flow daily batch" -Trigger (New-ScheduledTaskTrigger -Daily -At 6:00)
+```
+
+2 回目の実行がジョブの冪等性（UPSERT / NO_DATA スキップ）で安全なのは #3 で検証済みなので、確認発火 → 翌朝の本番発火と 2 回動いても問題ありません。
+
 ## 罠 ①: `LastTaskResult = 4294770688`
 
 リリース前検証での 1 回目の失敗です。登録した覚えのない値が返ってきました。
