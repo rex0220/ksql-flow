@@ -156,6 +156,9 @@ $trigger = New-ScheduledTaskTrigger -Daily -At (Get-Date).AddMinutes(5)
 
 # 3. トリガーを本番時刻へ変更（登録し直し不要）
 Set-ScheduledTask -TaskName "kSQL Flow daily batch" -Trigger (New-ScheduledTaskTrigger -Daily -At 6:00)
+
+# 4. スケジュールの確認 — NextRunTime が翌朝 6:00 になっていること
+Get-ScheduledTaskInfo -TaskName "kSQL Flow daily batch" | Format-List NextRunTime,LastRunTime,LastTaskResult
 ```
 
 2 回目の実行がジョブの冪等性（UPSERT / NO_DATA スキップ）で安全なのは #3 で検証済みなので、確認発火 → 翌朝の本番発火と 2 回動いても問題ありません。

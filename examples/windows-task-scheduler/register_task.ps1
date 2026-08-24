@@ -37,5 +37,7 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Se
 #      wait for it to fire, check LastTaskResult = 0, then switch to the
 #      production time without re-registering:
 #        Set-ScheduledTask -TaskName "kSQL Flow daily batch" -Trigger (New-ScheduledTaskTrigger -Daily -At 6:00)
+#      and confirm the schedule (NextRunTime should be tomorrow 6:00):
+#        Get-ScheduledTaskInfo -TaskName "kSQL Flow daily batch" | Format-List NextRunTime,LastRunTime,LastTaskResult
 # Remove:
 #   Unregister-ScheduledTask -TaskName "kSQL Flow daily batch" -Confirm:$false
