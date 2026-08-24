@@ -39,5 +39,10 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Se
 #        Set-ScheduledTask -TaskName "kSQL Flow daily batch" -Trigger (New-ScheduledTaskTrigger -Daily -At 6:00)
 #      and confirm the schedule (NextRunTime should be tomorrow 6:00):
 #        Get-ScheduledTaskInfo -TaskName "kSQL Flow daily batch" | Format-List NextRunTime,LastRunTime,LastTaskResult
+# Pause / resume (e.g. during kintone or app maintenance; settings are kept):
+#   Disable-ScheduledTask -TaskName "kSQL Flow daily batch"
+#   Enable-ScheduledTask  -TaskName "kSQL Flow daily batch"
+#   (runs skipped while disabled are NOT caught up automatically -- run
+#    run_batch.bat once by hand after resuming if needed; jobs are idempotent)
 # Remove:
 #   Unregister-ScheduledTask -TaskName "kSQL Flow daily batch" -Confirm:$false

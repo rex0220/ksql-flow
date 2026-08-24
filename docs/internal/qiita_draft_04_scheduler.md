@@ -163,6 +163,16 @@ Get-ScheduledTaskInfo -TaskName "kSQL Flow daily batch" | Format-List NextRunTim
 
 2 回目の実行がジョブの冪等性（UPSERT / NO_DATA スキップ）で安全なのは #3 で検証済みなので、確認発火 → 翌朝の本番発火と 2 回動いても問題ありません。
 
+運用に入ってからの一時停止（kintone やアプリのメンテナンス時など）・再開・削除も 1 行ずつです:
+
+```powershell
+Disable-ScheduledTask -TaskName "kSQL Flow daily batch"    # 一時停止（設定は保持）
+Enable-ScheduledTask  -TaskName "kSQL Flow daily batch"    # 再開
+Unregister-ScheduledTask -TaskName "kSQL Flow daily batch" -Confirm:$false   # 削除
+```
+
+停止中にスキップした朝の分は、再開しても自動では追いかけません。必要なら再開後に `.\run_batch.bat` を手動で 1 回流します（ジョブが冪等なので安全）。
+
 ## 罠 ①: `LastTaskResult = 4294770688`
 
 リリース前検証での 1 回目の失敗です。登録した覚えのない値が返ってきました。
