@@ -257,6 +257,21 @@ ksql run-all ./jobs/ --profile prod --stop-on-error
 ksql run-all ./jobs/ --profile prod --continue-on-error
 ```
 
+### 4.1 途中のジョブが失敗したときのふるまい（まとめ）
+
+run-all の失敗時挙動は複数章にまたがるため、ここに要約します（詳細の正は各参照先）。
+
+| | 失敗したジョブ | 依存する後続（`depends_on` 宣言あり） | 独立した後続 | 終了コード |
+| --- | --- | --- | --- | --- |
+| **既定** | 残ステップ破棄・FAILED 系記録 | `SKIPPED（dependency）` | **実行する** | 失敗の最重大コード（3 > 2 > 5 > 1） |
+| `--stop-on-error` | 同上 | `SKIPPED（stop-on-error）` | `SKIPPED（stop-on-error）` | 同上 |
+| `--continue-on-error` | 同上 | `SKIPPED（dependency）` | 実行する | 成功と混在なら **4**（部分成功） |
+
+* 例外: `limits.maxApiCalls` 超過（7.2）時は、オプション指定に関わらず**以降の全ジョブを `SKIPPED（stop-on-error）` で停止**する（カウンタはバッチ全体で単一のため、続行しても後続は実行できない）。`limits.batchTimeoutSec` 超過（7.3）時も同様に以降を `SKIPPED（batch-timeout）` とし、BATCH は `TIMEOUT` になる
+* 通知: 失敗があれば BATCH レコードが FAILED 系（`FAILED` / `ABORTED` / `TIMEOUT`）になり、kintone 条件通知は BATCH の 1 通に集約される（8.2）
+* 復旧: `--resume` が失敗・未実行分のみを**元の as-of を引き継いで**再実行する。成功済みジョブは再実行しない（6.3）
+* 部分適用: 失敗ジョブの書込は途中まで適用された状態で残る。復旧は冪等リランを正とする（5.1）
+
 ---
 
 ## 5. 実行モデルとデータ整合性
