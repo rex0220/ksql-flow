@@ -277,7 +277,8 @@ describe("fail-closed とローカルフォールバック（受入基準 5）",
     world.mock.failNext({
       times: 2, // maxAttempts=2 の両試行
       status: 503,
-      match: (method, p) => method === "PUT" && p.endsWith("/records.json"),
+      // v3.74.0 以降は業務書込（native upsert）も PUT のため、ログアプリ宛だけに絞る
+      match: (method, p, appId) => method === "PUT" && p.endsWith("/records.json") && appId === LOG_APP,
     });
     const file = writeJob(world, "01_monthly.sql", SAMPLE_JOB);
     const code = await runCommand(world.profile, file, {

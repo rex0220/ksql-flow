@@ -2,6 +2,12 @@
 
 このプロジェクトの主な変更を記録します。
 
+## [0.4.0] - 2026-08-25
+
+- エンジン依存を v3.74.0 系に更新（`^3.74.0`）。素の UPSERT は既定で kintone の **native upsert**（`updateKey` + `upsert: true`）となり、**事前 GET（50 キー/回）が消えて UPSERT の API 消費が約 1/3 に**（例: 1 万件で 300 → 100 回。日次 API リクエスト数にも効く）。適用条件を欠く文（空文字キー・ソース内キー重複・CHECK/APPLY 併用等）は従来経路へ自動フォールバックし、結果は等価。
+- **注意: native upsert は更新だけで完結する UPSERT でも対象アプリの「レコード追加権限」を要求**します（kintone の仕様）。標準の書込可トークン（閲覧 + 追加 + 編集）なら影響ありません。
+- ランナーのコード変更はなし（`operation` の新値 `"UPSERT"` は既存の集計・記録に影響しないことを確認）。公開仕様 §3.4 / §11 の実装注記と推定式の記述を更新。テストのモック kintone に native upsert セマンティクス（updateKey 照合・ソース内重複 GAIA_IQ28・空文字キー拒否・`records[].operation`）を実装。
+
 ## [0.3.1] - 2026-08-24
 
 - コード変更なし（配布物のみのパッチリリース）。
@@ -33,6 +39,7 @@
 - `--check-logapp` の選択肢集合検査、template 契約テスト、Node 18 / npm pack install smoke CI、unlock 対象一覧表示を追加。
 - clientCert / proxy と validate の推定 API 消費・所要時間表示を v0.1 非対応として明記。
 
+[0.4.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.4.0
 [0.3.1]: https://github.com/rex0220/ksql-flow/releases/tag/v0.3.1
 [0.3.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.3.0
 [0.2.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.2.0

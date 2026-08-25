@@ -230,7 +230,8 @@ INSERT INTO LAPP_顧客マスタ (顧客コード, 当月売上実績) VALUES ('
     let customerWriteAttempts = 0;
     const failingFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const body = typeof init?.body === "string" ? (JSON.parse(init.body) as { app?: number }) : {};
-      if ((init?.method ?? "GET").toUpperCase() === "POST" && body.app === CUSTOMER_APP) {
+      // v3.74.0 以降、UPSERT の書込は native upsert の PUT で飛ぶ
+      if ((init?.method ?? "GET").toUpperCase() === "PUT" && body.app === CUSTOMER_APP) {
         customerWriteAttempts += 1;
         if (customerWriteAttempts >= 3) {
           return new Response(JSON.stringify({ code: "MOCK", message: "third chunk failed" }), {

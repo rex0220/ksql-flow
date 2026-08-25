@@ -1,9 +1,10 @@
-# kSQL エンジンからの通知 — v3.73.0 で native UPSERT が `/flow` の既定になります
+# kSQL エンジンからの通知 — native UPSERT が `/flow` の既定になります（**v3.74.0 をお使いください**）
 
 - 日付: 2026-08-25 ／ 差出: kintone-sql-tools（kSQL エンジン）／ 宛先: ksql-flow
 - 対象: [依頼 F-7](kSQLエンジンへの依頼-20260825-F7-upsert-updateKey.md)（エンジン側 B173）
-- 状態: **実装完了・PR 作成済み**（[#401](https://github.com/rex0220/kintone-sql-tools/pull/401)）。マージと npm publish は未了
-- **重要**: 貴側の追随作業の期限が**「有効化した時」から「アップグレードした時」へ前倒し**になります（§3）
+- 状態: **v3.74.0 として公開済み**（npm / GitHub Release・2026-08-25）
+- **重要 1**: 貴側の追随作業の期限が**「有効化した時」から「アップグレードした時」へ前倒し**になります（§3）
+- **重要 2**: **v3.73.0 ではなく v3.74.0 を入れてください。**機能は同じですが、v3.73.0 は `EXPLAIN` の適格性表示が壊れていました（§6）
 
 ## 1. 結論 — opt-in ではなく既定 ON にしました
 
@@ -22,7 +23,7 @@
 
 **変わるのは次の 5 点だけです。**
 
-| 変わるもの | 従来 | v3.73.0（native 適用時） |
+| 変わるもの | 従来 | native 適用時 |
 | --- | --- | --- |
 | 書込順 | 新規を全部 POST → 更新を全部 PUT | **ソース順の混在チャンク** |
 | 部分失敗時に確定している範囲 | 「新規は入った／更新は入っていない」 | **ソース順の prefix** |
@@ -43,7 +44,7 @@
 
 ## 3. 【重要】追随作業の期限が前倒しになります
 
-確認 6 点の返信で「仕様確定後に実施」とされていた 3 点は、**v3.73.0 へアップグレードした時点で効きます**。
+確認 6 点の返信で「仕様確定後に実施」とされていた 3 点は、**アップグレードした時点で効きます**。
 
 1. **推定式 7.2 / 10.2 と dry-run `estimatedWrites` の追随**（`ceil((insert+update)/100)` へ）
 2. **公開仕様 §3.4 の実装注記**（read-then-write → native）と、**opt-in 時の権限要件**の記述
@@ -69,15 +70,47 @@
 - **ソース内にキーが重複する文** — kintone がリクエストごと拒否するため、こちらで検出して従来経路へ落とします（**現行は後勝ちで成功していた形なので、結果を変えないための措置**です）
 - CLI（既定 OFF）・MCP・プラグイン・engine-library
 
-**`EXPLAIN` で適格性を確認できます** — `ELIGIBLE` / `INELIGIBLE`（理由つき）/ `UNKNOWN`（メタデータ未取得で判定できない）。**MCP やプラグインで検証しているときも、文とデータの条件は表示されます**（「`/flow` では native になる／どの面でもならない」が読めます）。
+**どれに当たるかは `EXPLAIN` で事前に読めます**（§6）。
 
-## 6. リリース状況
+## 6. `EXPLAIN` で適格性を確認できます（v3.74.0 で修正）
 
-- **PR 作成済み**（[#401](https://github.com/rex0220/kintone-sql-tools/pull/401)）。マージ・タグ・GitHub Release・npm publish は未了
-- ゲート: `npm test` 287 suites / 6285 tests 全緑
-- **publish 後に改めてご連絡します。** それまでは v3.72.0 のままで影響ありません
+**ジョブ SQL を書いている段階で「この UPSERT は native になるか」を確認できます。**
 
-## 7. 参照
+```
+native UPSERT statement/data eligibility: ELIGIBLE（条件 3〜6 を満たす）
+native UPSERT execution surface: NOT_APPLICABLE（この面では実行しない。/flow または CLI --native-upsert では native 候補）
+```
 
-- エンジン側記録: B173（`docs/internal/ksql_b173_native_upsert_spec.md` が仕様 R5・`..._update_key_issue.md` が起票と実測）
+**2 行に分かれているのが要点です。**
+
+- **`statement/data eligibility`** = **文とデータが native に適するか**。**どの面で EXPLAIN しても同じ答え**になります
+- **`execution surface`** = **その面が実際に native を使うか**。MCP・プラグインは常に `NOT_APPLICABLE`
+
+つまり **MCP やプラグインで EXPLAIN しても、`/flow` で native になるかを読めます。**面が違うことで判定が隠れないように分けてあります。
+
+不適格なときは**理由が条件番号つきで出ます** — 例: `INELIGIBLE（条件 6: SOURCE_DUPLICATE — ソース内に同一キーがある）`、`INELIGIBLE（条件 3: KEY_SCHEMA — キー項目は重複禁止の SINGLE_LINE_TEXT または NUMBER ではない）`。§5 のどれに当たったかがそのまま分かります。
+
+`UNKNOWN` が出るのは**フォーム定義を取得しない設定のとき**だけです（`resolveMetadata: false`、CLI の完全オフライン `--dry-run`）。**判定材料が無いという意味で、不適格という意味ではありません。**
+
+### 6.1 v3.73.0 ではこれが壊れていました
+
+**v3.73.0 の適格性表示は、実運用では常に `UNKNOWN` を返しました。** `EXPLAIN UPSERT` が対象アプリのフォーム定義を取得せず、キーが重複禁止かどうかを判定できなかったためです。リリース後の実機確認で判明し、**v3.74.0 で修正しました**（エンジン側 B176）。
+
+**native UPSERT の本体は v3.73.0 でも正しく動いており、API 削減の効果は出ていました。**壊れていたのは EXPLAIN の表示だけです。とはいえ**§5 の適用外条件を事前に読めないと使いにくい**ので、**v3.74.0 からお使いください**。
+
+**v3.74.0 で `EXPLAIN UPSERT` の挙動が変わる点**（v3.73.0 と比べて）:
+
+- **フォーム定義 API を 1 回呼びます**（`metrics.fieldCalls` が 0 → 1）。レコード API・Cursor API・mutation API は**引き続き 0 回**です
+- **出力行と `rowCount` が増えます**
+- **フォーム定義の取得に失敗すると `EXPLAIN UPSERT` がエラーになります**。握り潰して `UNKNOWN` に落とすと、権限不足や通信障害を「判定不能」として隠してしまうためです
+
+## 7. リリース状況
+
+- **v3.74.0 は npm と GitHub Release に公開済み**です（2026-08-25）
+- ゲート: `npm test` 288 suites / 6295 tests 全緑
+- **アップグレードすると `/flow` の UPSERT は既定で native になります。** §3 のトークン権限の確認をお願いします
+
+## 8. 参照
+
+- エンジン側記録: B173（`docs/internal/ksql_b173_native_upsert_spec.md` が仕様 R5・`..._update_key_issue.md` が起票と実測）／B176（`docs/internal/ksql_b176_explain_eligibility_always_unknown_issue.md`）
 - [F-7 の回答](kSQLエンジンからの回答-20260825-F7-upsert-updateKey.md)／[実測報告](kSQLエンジンからの実測報告-20260825-F7-native-upsert実機.md)／[確認 6 点への返信](kSQLエンジンへの返信-20260825-F7-確認6点回答.md)

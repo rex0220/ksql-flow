@@ -33,7 +33,7 @@ interface FailureRule {
   times: number;
   status: number;
   retryAfterSec?: number;
-  match?: (method: string, path: string) => boolean;
+  match?: (method: string, path: string, appId?: number) => boolean;
   body?: unknown;
   /** ネットワークエラー（fetch reject）にする */
   network?: boolean;
@@ -106,7 +106,7 @@ export class MockKintone {
     this.requests.push({ method, path, appId, token, body });
 
     for (const [index, rule] of this.failures.entries()) {
-      if (rule.times > 0 && (rule.match === undefined || rule.match(method, path))) {
+      if (rule.times > 0 && (rule.match === undefined || rule.match(method, path, appId))) {
         rule.times -= 1;
         if (rule.times === 0) this.failures.splice(index, 1);
         if (rule.network) throw new TypeError("fetch failed (mock network error)");
@@ -238,10 +238,79 @@ export class MockKintone {
     return jsonResponse(200, { ids: created.map((row) => String(row.id)), revisions: created.map(() => "1") });
   }
 
-  private putRecords(body: { app: number; records: Array<{ id: number; record: Record<string, { value: unknown }> }> }, token: string | undefined): Response {
+  private putRecords(
+    body: {
+      app: number;
+      upsert?: boolean;
+      records: Array<{
+        id?: number;
+        updateKey?: { field: string; value: unknown };
+        record: Record<string, { value: unknown }>;
+      }>;
+    },
+    token: string | undefined
+  ): Response {
     this.checkToken(body.app, token);
     const entry = this.apps.get(body.app)!;
     if (body.records.length > 100) throw new MockApiError(400, "CB_VA01", "records must be 100 or less");
+    // native upsert（v3.74.0 経路）: 実 kintone の実測挙動を再現する
+    //   - record に updateKey フィールド自体を含めると CB_VA01
+    //   - updateKey.value が空文字なら CB_VA01（必須です）
+    //   - リクエスト内で同一キーが既存 1 レコードに重複ヒット（=ソース内重複）なら GAIA_IQ28 で全体拒否
+    //   - レスポンスはリクエスト順の records[].operation（"INSERT" / "UPDATE"）
+    if (body.upsert === true) {
+      const matchKey = (row: StoredRecord, field: string, value: unknown): boolean => {
+        const def = entry.def.fields[field];
+        const stored = row.values[field];
+        if (def?.type === "NUMBER") return Number(stored) === Number(value);
+        return stored === normalizeValue(value);
+      };
+      const seen = new Set<string>();
+      const plans: Array<{ stored: StoredRecord | undefined; update: (typeof body.records)[number] }> = [];
+      for (const update of body.records) {
+        if (update.updateKey === undefined) {
+          const stored = entry.records.find((row) => row.id === Number(update.id));
+          if (!stored) throw new MockApiError(404, "GAIA_RE01", `record ${update.id} not found in app ${body.app}`);
+          plans.push({ stored, update });
+          continue;
+        }
+        const { field, value } = update.updateKey;
+        if (entry.def.fields[field]?.unique !== true) {
+          throw new MockApiError(400, "CB_VA01", `updateKey field ${field} must be unique`);
+        }
+        if (normalizeValue(value) === "") throw new MockApiError(400, "CB_VA01", `records[].updateKey.value: 必須です。`);
+        if (field in update.record) {
+          throw new MockApiError(400, "CB_VA01", `「updateKey」に指定したフィールドの値は更新できません。`);
+        }
+        const dupKey = `${field}:${normalizeValue(value)}`;
+        if (seen.has(dupKey)) {
+          throw new MockApiError(400, "GAIA_IQ28", `「updateKey」に指定した条件にあてはまるレコードが重複しています。`);
+        }
+        seen.add(dupKey);
+        plans.push({ stored: entry.records.find((row) => matchKey(row, field, value)), update });
+      }
+      const results: Array<{ id: string; revision: string; operation: "INSERT" | "UPDATE" }> = [];
+      for (const { stored, update } of plans) {
+        if (stored !== undefined) {
+          const next: Record<string, string> = { ...stored.values };
+          for (const [code, item] of Object.entries(update.record)) next[code] = normalizeValue(item.value);
+          this.enforceUnique(body.app, next, stored.id);
+          stored.values = next;
+          stored.revision += 1;
+          results.push({ id: String(stored.id), revision: String(stored.revision), operation: "UPDATE" });
+        } else {
+          const values: Record<string, string> = {};
+          for (const [code, item] of Object.entries(update.record)) values[code] = normalizeValue(item.value);
+          if (update.updateKey !== undefined) values[update.updateKey.field] = normalizeValue(update.updateKey.value);
+          this.enforceUnique(body.app, values, null);
+          const created: StoredRecord = { id: entry.nextId, revision: 1, values };
+          entry.nextId += 1;
+          entry.records.push(created);
+          results.push({ id: String(created.id), revision: "1", operation: "INSERT" });
+        }
+      }
+      return jsonResponse(200, { records: results });
+    }
     for (const update of body.records) {
       const stored = entry.records.find((row) => row.id === Number(update.id));
       if (!stored) throw new MockApiError(404, "GAIA_RE01", `record ${update.id} not found in app ${body.app}`);
