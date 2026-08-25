@@ -7,23 +7,23 @@
 
 ## 事前確認（アップグレード前）
 
-- [ ] `/flow` が使う API トークンに対象アプリの**レコード追加権限**があること（native は更新だけで完結する UPSERT でも追加権限を要求。標準運用「閲覧 + 追加 + 編集」なら OK。無い場合は実行時エラー — `enableNativeUpsert: false` で退避可）
-- [ ] CLI リハーサル（任意）: `--allow-dml --native-upsert` で本番と同じトークンのプロファイルに対して権限要件込みの事前確認ができる
+- [x] `/flow` が使う API トークンに対象アプリの**レコード追加権限**があること（標準運用「閲覧 + 追加 + 編集」で確認済み — M 実測も権限エラーなし）
+- [x] CLI リハーサル → 縮小実測（M・実機）で代替済み
 
 ## コード・仕様の追随（ksql-flow リリース 1 本にまとめる）
 
-- [ ] `package.json` の依存を `^3.73.0` へ、README 互換表に行追加
+- [x] `package.json` の依存を `^3.74.0` へ、README 互換表に行追加（v0.4.0）
 - [x] **推定式 7.2 / 10.2 と dry-run `estimatedWrites`** を `ceil((insert+update)/100)` へ（従来: `ceil(新規/100) + ceil(更新/100)`）
 - [x] **公開仕様 §3.4 の実装注記**を更新: read-then-write → native（updateKey + upsert: true・既定 ON・適用されない形の列挙 = CHECK/APPLY/IMPORT・複合キー・非 unique・空文字キー・ソース内重複は従来経路へ自動 fallback）。**権限要件（追加権限必須）**も明記
-- [ ] `onChunkWritten.operation` の新値 **`"UPSERT"`**（+ `insertedCount` / `updatedCount`）への型追随。executor の `=== "DELETE"` 判定・JSONL 素通しは無変更で正しく動く（エンジン側確認済み・通知 §2.1）が、型 union の更新と、JSONL に内訳を載せるかを判断
-- [ ] `ExecutionMetrics` の変化（`postCalls` = 0・`nativeUpsertCalls` 内数）に依存した表示・テストがないか確認（`api_calls` は自前 HTTP カウンタなので影響なし — エンジン確認済み）
+- [x] `onChunkWritten.operation` の新値 **`"UPSERT"`** — 型はエンジン 3.74.0 の union で追随済み（typecheck green）。executor は無変更で正（`=== "DELETE"` 判定・JSONL 素通し）。JSONL への内訳（insertedCount/updatedCount）追加は必要が生じるまで見送り
+- [x] `ExecutionMetrics` の変化 — 依存箇所なし（`api_calls` は自前 HTTP カウンタ）。全 160 テスト green で確認
 - [x] 仕様 §4.1 は影響なし（UPSERT の失敗系挙動は不変）を確認のみ
 
 ## 受入実測（受入基準 1 — 通知 §4 の推奨手順）
 
-- [ ] `enableNativeUpsert: false` で現行経路の基準値（XL 相当: UPSERT 10,000 → 事前 GET 200 + 書込 100〜101 回）を取る
-- [ ] 既定（native）で再測 → **UPSERT フェーズ約 100 回・ジョブ全体 511 → 約 311 回**を確認
-- [ ] 結果を `verification/scale-notes.md` に追記（日次 API 上限カウントの併記ルールで）し、エンジンへ共有
+- [x] **縮小版（M）で実施済み（2026-08-25）**: M 集計ジョブが **API 17 → 14 回**（事前 GET -4 + 適格性判定のフォーム定義 +1 = 差引 -3 で完全一致）。SUCCESS・verify 全一致・cleanup 済み。`enableNativeUpsert: false` の直接 A/B はランナーに off スイッチが無いため旧実測（17 回）を基準値に採用
+- [ ] （任意・正式受入）XL 相当の再実測 → **ジョブ全体 511 → 約 312 回**の確認（seed 約 38 分 + 日次 API 上限の相当量を消費するため実施タイミングは要判断）
+- [x] 結果を `verification/scale-notes.md` に追記（M 分）。エンジンへの共有は XL 実施判断とあわせて
 
 ## ドキュメント・記事系
 
