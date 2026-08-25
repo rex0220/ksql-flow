@@ -63,7 +63,7 @@ tags:
 
 ## 検証 2 — 効いたのは「リクエストそのものを減らす」
 
-冒頭の疑問に戻ります。kintone の[レコード更新 API](https://cybozu.dev/ja/kintone/docs/rest-api/records/update-records/) には `upsert: true` + `updateKey` があり、**キーの存在判定を kintone 側に委ねて、1 リクエスト（100 件）で挿入と更新を書き分けられます**。従来のエンジンは read-then-write（GET でキー照合 → POST / PUT に振り分け）で、この事前 GET が例の 200 回でした。
+冒頭の疑問に戻ります。kintone の[レコード更新 API](https://cybozu.dev/ja/kintone/docs/rest-api/records/update-records/) には `upsert: true` + `updateKey` があり、**キーの存在判定を kintone 側に委ねて、1 リクエスト（100 件）で挿入と更新を書き分けられます**。従来のエンジンは read-then-write（GET でキー照合 → POST / PUT に振り分け）で、この事前 GET が例の 200 回でした。具体的にはレコード一括取得（`GET /k/v1/records.json`）に `キー in ("値1", …, "値50")` のクエリを付けて 50 キーずつ引くもので、キーの存在判定と、更新時のレコード番号指定 PUT に必要な `$id` の取得を兼ねています。native upsert は `updateKey` 指定で `$id` を知らずに書けるため、この照合ごと不要になります。
 
 エンジン v3.74.0 で、素の UPSERT は既定でこの **native upsert** になりました。設計の要点は「**速くするだけで、意味を変えない**」ことです:
 
