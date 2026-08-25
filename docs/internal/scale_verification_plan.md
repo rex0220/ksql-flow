@@ -165,7 +165,7 @@ UPSERT の事前 GET は 50 キー/回、cleanup の ID 取得読取・metadata�
 | --- | --- | --- |
 | F-4 | 大量削除の押し下げ支援 | **不成立で確定（起票不要）** — 会社名 IN のバッチ分割方式が XL（DELETE 11 万件・8.8 分）まで機能 |
 | F-5 | kintone `bulkRequest` 対応 | **保留合意・実質クローズ（2026-08-25）** — §6 A/B 実測で B/A = 96%（束ねても縮まない = サーバ側処理支配）。日次 API 上限にも効かない。`docs/kSQLエンジンへの返信-20260825-F5-AB実測.md` |
-| F-7 | UPSERT の `updateKey + upsert: true` 採用（事前 GET 200 回の削減 — XL で API 511 → 約 311 回） | **実機測定完了・エンジン側仕様起草中（2026-08-25）** — 適用条件 6 つ確定（素の UPSERT・opt-in 既定 OFF・単一重複禁止キー・空文字なし・ソース全体でキー一意ほか）。条件を欠く文は現行経路へ自動 fallback で意味不変。ランナー側の追随 4 点（推定式・§3.4・operation 切替・日次上限併記）はエンジン仕様確定待ち。`docs/kSQLエンジンからの実測報告-20260825-F7-native-upsert実機.md` |
+| F-7 | UPSERT の `updateKey + upsert: true` 採用（事前 GET 200 回の削減 — XL で API 511 → 約 311 回） | **実装完了・PR #401・publish 待ち（2026-08-25）** — `/flow` は **既定 ON** に変更（当初 opt-in から前倒し）。UPSERT 1 万件で API 300 → 100 回。ランナー実装は無変更で動く（エンジン側コード確認済み）が、**追随 3 点は v3.73.0 へ依存を上げた時点で必要** → `docs/internal/f7_v3730_upgrade_checklist.md`。publish 連絡待ち |
 | — | IMPORT capability gate の有効化手段 | ~~S 前スモークで確認~~ → **機能確認済み（起票不要）** |
 | F-6 | DML 候補取得の長大クエリ対応（GET → POST/X-HTTP-Method-Override 等） | 実測で kintone 入口 nginx が URL ≈8KB 超を 414/431 拒否（単文 UPDATE 実験）。**実務で大量 IN 指定が要件化した場合のみ**起票（現行は分割 or 押し下げ可能条件で設計回避可能） |
 
