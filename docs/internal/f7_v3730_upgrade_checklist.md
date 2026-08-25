@@ -13,11 +13,11 @@
 ## コード・仕様の追随（ksql-flow リリース 1 本にまとめる）
 
 - [ ] `package.json` の依存を `^3.73.0` へ、README 互換表に行追加
-- [ ] **推定式 7.2 / 10.2 と dry-run `estimatedWrites`** を `ceil((insert+update)/100)` へ（従来: `ceil(新規/100) + ceil(更新/100)`）
-- [ ] **公開仕様 §3.4 の実装注記**を更新: read-then-write → native（updateKey + upsert: true・既定 ON・適用されない形の列挙 = CHECK/APPLY/IMPORT・複合キー・非 unique・空文字キー・ソース内重複は従来経路へ自動 fallback）。**権限要件（追加権限必須）**も明記
+- [x] **推定式 7.2 / 10.2 と dry-run `estimatedWrites`** を `ceil((insert+update)/100)` へ（従来: `ceil(新規/100) + ceil(更新/100)`）
+- [x] **公開仕様 §3.4 の実装注記**を更新: read-then-write → native（updateKey + upsert: true・既定 ON・適用されない形の列挙 = CHECK/APPLY/IMPORT・複合キー・非 unique・空文字キー・ソース内重複は従来経路へ自動 fallback）。**権限要件（追加権限必須）**も明記
 - [ ] `onChunkWritten.operation` の新値 **`"UPSERT"`**（+ `insertedCount` / `updatedCount`）への型追随。executor の `=== "DELETE"` 判定・JSONL 素通しは無変更で正しく動く（エンジン側確認済み・通知 §2.1）が、型 union の更新と、JSONL に内訳を載せるかを判断
 - [ ] `ExecutionMetrics` の変化（`postCalls` = 0・`nativeUpsertCalls` 内数）に依存した表示・テストがないか確認（`api_calls` は自前 HTTP カウンタなので影響なし — エンジン確認済み）
-- [ ] 仕様 §4.1 は影響なし（UPSERT の失敗系挙動は不変）を確認のみ
+- [x] 仕様 §4.1 は影響なし（UPSERT の失敗系挙動は不変）を確認のみ
 
 ## 受入実測（受入基準 1 — 通知 §4 の推奨手順）
 
