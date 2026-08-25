@@ -440,4 +440,5 @@ npm run job -- -f jobs/monthly_deal_summary.sql --profile prod
 2. **#2（本記事）**: AI エージェントにジョブを書かせる（MCP + 二段 validate + dry-run レビュー）
 3. **#3**: [毎朝の無人実行の前に — kintone バッチを 200 → 20,000 → 100,000 件で鍛える](https://qiita.com/rex0220/items/62e950ab1ccc5b54ff69)
 4. **#4**: [タスクスケジューラで毎朝動かす — PowerShell が 0.1 秒で無言死する罠つき](https://qiita.com/rex0220/items/d0a66c133edd42ff91c4)
-5. 以降、GitHub Actions / cron・Docker / レンタルサーバー / Google Cloud の環境別と、排他・冪等リランの設計深掘りを予定
+5. **#5**: [kintone バッチの API 消費を 4 割減らすまで — 「束ねれば速い」が実測で覆った話](https://qiita.com/rex0220/items/9cbc1e0e9b5ab292e6a1)
+6. 以降、GitHub Actions / cron・Docker / レンタルサーバー / Google Cloud の環境別と、排他・冪等リランの設計深掘りを予定

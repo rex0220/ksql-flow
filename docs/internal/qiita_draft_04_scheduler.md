@@ -286,4 +286,5 @@ Webhook は「ログアプリに書けないほどの失敗でも飛ぶ」「hea
 2. **#2**: [AI エージェントに kintone のバッチジョブを書かせる — MCP + Claude Code](https://qiita.com/rex0220/items/3a1213a596a8c49b67aa)
 3. **#3**: [毎朝の無人実行の前に — kintone バッチを 200 → 20,000 → 100,000 件で鍛える](https://qiita.com/rex0220/items/62e950ab1ccc5b54ff69)
 4. **#4（本記事）**: タスクスケジューラで毎朝動かす
-5. 以降、GitHub Actions / cron・Docker / レンタルサーバー / Google Cloud の環境別と、排他・冪等リランの設計深掘りを予定
+5. **#5**: [kintone バッチの API 消費を 4 割減らすまで — 「束ねれば速い」が実測で覆った話](https://qiita.com/rex0220/items/9cbc1e0e9b5ab292e6a1)
+6. 以降、GitHub Actions / cron・Docker / レンタルサーバー / Google Cloud の環境別と、排他・冪等リランの設計深掘りを予定

@@ -167,3 +167,4 @@ UPDATE を文分割しているのは検証特有の事情です。書込系の 
 2. **#2**: [AI エージェントに kintone のバッチジョブを書かせる — MCP + Claude Code](https://qiita.com/rex0220/items/3a1213a596a8c49b67aa)
 3. **#3（本記事）**: 毎朝の無人実行の前に — kintone バッチを 200 → 20,000 → 100,000 件で鍛える
 4. **#4**: [タスクスケジューラで毎朝動かす — PowerShell が 0.1 秒で無言死する罠つき](https://qiita.com/rex0220/items/d0a66c133edd42ff91c4)
+5. **#5**: [kintone バッチの API 消費を 4 割減らすまで — 「束ねれば速い」が実測で覆った話](https://qiita.com/rex0220/items/9cbc1e0e9b5ab292e6a1)（本記事の API 511 回の謎を回収する続編）
