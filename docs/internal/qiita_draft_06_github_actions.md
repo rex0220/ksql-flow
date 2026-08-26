@@ -22,10 +22,12 @@ tags:
 
 置き場所はリポジトリ直下の **`.github/workflows/`** です（[テンプレートの実物](https://github.com/rex0220/ksql-flow-template/tree/main/.github/workflows)）。ドット始まりのフォルダーなので、GitHub のファイル一覧では `dev/` や `jobs/` より**上の最上部**に表示されます — 探すときはそこか、リポジトリの **Actions タブ**（登録済みワークフローとして 2 本並びます）を見てください。
 
-| workflow | トリガー | 内容 |
-| --- | --- | --- |
-| `daily-batch.yml` | 毎朝 6:07 JST + 手動 | `run-all ./jobs`。手動実行時は `--resume` チェックボックス付き |
-| `pr-check.yml` | PR（jobs/・config の変更時） | `validate-all` → `run-all --dry-run --json` → **差分プレビューを PR に自動コメント** |
+この YAML は GitHub Actions の**ワークフロー定義ファイル**で、「いつ（トリガー）・どんな環境で・何を実行するか」を宣言する**実行の指示書**です。GitHub がこのフォルダーを自動で読み取り、条件が満たされると GitHub のサーバー上（Ubuntu の使い捨て VM）で実行します。[#4](https://qiita.com/rex0220/items/d0a66c133edd42ff91c4) との対比で言えば、**タスクスケジューラの「タスク登録」に相当するものをファイルとして Git 管理している**形です。中身は kSQL Flow の CLI を呼ぶだけの薄い包みで、どちらも数十行で全体が追えます。
+
+| workflow | 役割 | トリガー | 内容 |
+| --- | --- | --- | --- |
+| `pr-check.yml` | **マージ前の門番** | PR（jobs/・config の変更時） | `validate-all` → `run-all --dry-run --json` → **差分プレビューを PR に自動コメント** |
+| `daily-batch.yml` | **マージ後の実行係** | 毎朝 6:07 JST + 手動 | checkout → `npm ci` → `run-all ./jobs`。手動実行時は `--resume` チェックボックス付き |
 
 どちらも**既定では無効**です。リポジトリ変数 `KSQL_ACTIONS_ENABLED = true` を置いたときだけ動きます。
 
