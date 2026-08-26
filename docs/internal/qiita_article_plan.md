@@ -140,7 +140,7 @@
 | 3 | ⑨ スケール検証編（#3） | **公開済み 2026-08-23**（#3） |
 | 4 | ③ Windows タスクスケジューラ（運用編・#4） | **公開済み 2026-08-24**（#4） |
 | 5 | ⑩ API 削減実測編（#5） | **公開済み 2026-08-25**: https://qiita.com/rex0220/items/9cbc1e0e9b5ab292e6a1（ChatGPT 9.7 消化済み。F-5 A/B・F-7 native upsert・ロールバック仮説） |
-| 6 | ② GitHub Actions | 実機検証待ち（Secrets 設定後）。以降 #6 へスライド |
+| 6 | ② GitHub Actions（#6） | **公開済み 2026-08-27**: https://qiita.com/rex0220/items/a522f7880a5960f033b3（PR 差分自動コメントが主役。実機検証 5 項目 + schedule 遅延実測 3 点 + 過去記事 +99 分の引用。ChatGPT 9.7/批判的評価消化済み。ドラフト: qiita_draft_06_github_actions.md） |
 | 7 | ④ cron / Docker | 隔週 |
 | 8 | ④'' レンタルサーバー cron 編 | 契約中のサーバーで実機検証してから。「既存資産に載せる」訴求の第 2 弾 |
 | 9 | ④'-b GCP 編 | examples の Cloud Run Jobs 例を追加してから。共通設計論もこの記事が持つ |
