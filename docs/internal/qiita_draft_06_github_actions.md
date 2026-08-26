@@ -143,6 +143,8 @@ schedule 起動時には `resume` が指定されないため、この構成で�
 1. **Variables**: `KSQL_ACTIONS_ENABLED` = `true`
 2. **Secrets**: 書込可 3 つ（`KSQL_TOKEN_DEALS` / `KSQL_TOKEN_CUSTOMERS` / `KSQL_TOKEN_LOGS`）+ 閲覧のみ 3 つ（`*_RO`）
 
+このうち **`KSQL_TOKEN_LOGS_RO` だけは本記事で初登場**です。[#2](https://qiita.com/rex0220/items/3a1213a596a8c49b67aa) までの構成で発行済みの閲覧のみトークンは案件管理・顧客管理の 2 つ（MCP 用 — MCP はログアプリを参照しないため）でした。pr-check はログアプリを含む config 全体を閲覧のみで解決する必要があるので、**ログアプリでも「レコード閲覧」のみのトークンを追加発行**してください（1 分。テンプレートの `.env.example` にも追記済みです）。
+
 CLI 派なら `gh variable set` / `gh secret set` で同じことができます。トークン値は書込可を含むので、扱いは #4 のサーバー `.env` と同格 — GitHub の Secrets は暗号化保存・ログ自動マスクですが、リポジトリの管理権限を持つ人が実行内容を変えられる点は意識してください（保護ブランチ + 必須レビューで main へのマージを守るのがセットです）。
 
 ## まとめ
