@@ -21,6 +21,24 @@ tags:
 ![2026-08-26_22h10_45.png](https://qiita-image-store.s3.ap-northeast-1.amazonaws.com/0/100572/72ab9686-81ab-4fac-9b90-2c0ad2498702.png)
 
 
+## 前提知識 — GitHub Actions とは（1 分で）
+
+[GitHub Actions](https://docs.github.com/ja/actions) は、**GitHub に内蔵された自動実行サービス**です。リポジトリ内の設定ファイル（ワークフロー）に「いつ・何を実行するか」を書いておくと、GitHub が自分のサーバー上でそれを実行してくれます。CI/CD（テストやデプロイの自動化）の道具として使われるのが定番ですが、本記事では「**毎朝コマンドを 1 本叩く**」「**PR が開いたら検証を回す**」という使い方をします。
+
+用語は 5 つ知っていれば読めます:
+
+| 用語 | 意味 | 本記事での実体 |
+| --- | --- | --- |
+| **ワークフロー** | 自動実行の定義（YAML ファイル） | `.github/workflows/` の 2 ファイル |
+| **トリガー** | 実行のきっかけ | `schedule`（毎朝）・`pull_request`（PR）・`workflow_dispatch`（手動ボタン） |
+| **ランナー** | 実行される場所。GitHub が用意する**使い捨ての Linux VM**（実行のたびに新品） | `ubuntu-latest`（Node を入れて kSQL Flow を動かす） |
+| **ステップ** | ランナー上で順に実行されるコマンド | checkout → `npm ci` → `ksql-flow run-all` |
+| **Secrets / Variables** | リポジトリに保存する秘密値 / 設定値 | kintone トークン / 有効化フラグ（後述） |
+
+実行履歴と各回のログは、リポジトリの **Actions タブ**にすべて残ります。
+
+料金は、**private リポジトリでも無料枠が月 2,000 分**（GitHub Free・執筆時点）。本構成の消費は daily-batch が 1 回約 1 分 × 毎朝 + pr-check が PR ごとに約 1 分なので、**月 50 分前後 — 無料枠の数 %** です。サーバー代どころか Actions 代も実質ゼロで収まります。
+
 ## 同梱ワークフローは 2 本
 
 置き場所はリポジトリ直下の **`.github/workflows/`** です（[テンプレートの実物](https://github.com/rex0220/ksql-flow-template/tree/main/.github/workflows)）。ドット始まりのフォルダーなので、GitHub のファイル一覧では `dev/` や `jobs/` より**上の最上部**に表示されます — 探すときはそこか、リポジトリの **Actions タブ**（登録済みワークフローとして 2 本並びます）を見てください。
