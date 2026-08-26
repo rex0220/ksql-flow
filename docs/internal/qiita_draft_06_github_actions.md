@@ -123,14 +123,18 @@ on:
 
 schedule 起動時には `resume` が指定されないため、この構成では通常実行になります。
 
-<!-- TODO: 実機検証後に記入 —
-## 実機検証の記録
-- daily-batch 手動発火 → SUCCESS・ログアプリ BATCH/JOB 記録・所要時間
-- schedule 自然発火（6:07 設定のまま 1 晩）→ 実際の起動時刻（遅延の実測）
-- テスト PR → validate + dry-run コメントのスクリーンショット
-- 失敗系: notify_test を含む PR → Exit 2 で checks が赤くなること・コメントに ABORTED が出ること
-- resume 実行の記録
--->
+## 実機検証の記録（2026-08-26）
+
+すべて my-ksql-jobs（テンプレートから作った実リポジトリ）+ kintone 開発環境・KSQL-FLOW-TEST 専有データで実施。
+
+| 検証 | 結果 |
+| --- | --- |
+| daily-batch 手動発火（本実行） | SUCCESS — 読取 2,000 / 書込 200 / API 13 回。発火から完了まで約 17 秒（npm ci 含む）。ログアプリに BATCH/JOB 記録 |
+| テスト PR（コメント 1 行の変更） | pr-check 21 秒で success。差分コメント自動投稿: ・Exit Code 0 |
+| 失敗系 PR（ASSERT 違反ジョブ入り） | pr-check **failure（赤）**。コメントに ABORTED 行 + 「Exit Code: 2（0 以外 — マージ前に要確認）」— マージ前に止まる |
+| resume 実行（チェックボックス ON） |  が付与され「元セッションの as-of を引き継ぎます」→ 失敗なしのため「再実行が必要なジョブはありません」で正常終了 |
+| schedule 自然発火（6:07 設定） | <!-- TODO: 明朝の実測（実際の起動時刻・遅延） --> |
+
 
 ## 有効化手順（テンプレート利用者向け・3 分）
 
