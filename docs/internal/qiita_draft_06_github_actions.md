@@ -228,9 +228,12 @@ schedule 起動時には `resume` が指定されないため、この構成で�
 
 ```bash
 gh variable set KSQL_ACTIONS_ENABLED --body "true"
-gh secret set KSQL_TOKEN_DEALS        # 実行すると値の入力を促される（画面に表示されない）
-gh secret set KSQL_TOKEN_CUSTOMERS
-# …残り 4 つも同様
+gh secret set KSQL_TOKEN_DEALS          # 書込可（案件管理）— 実行すると値の入力を促される（画面に表示されない）
+gh secret set KSQL_TOKEN_CUSTOMERS      # 書込可（顧客管理）
+gh secret set KSQL_TOKEN_LOGS           # 書込可（実行ログ）
+gh secret set KSQL_TOKEN_DEALS_RO       # 閲覧のみ（案件管理）
+gh secret set KSQL_TOKEN_CUSTOMERS_RO   # 閲覧のみ（顧客管理）
+gh secret set KSQL_TOKEN_LOGS_RO        # 閲覧のみ（実行ログ — 本記事で追加発行したもの）
 ```
 
 `gh secret set 名前` は値を対話プロンプトで受け取るので、コマンド履歴やターミナル画面にトークンが残りません（`--body "値"` で渡すと履歴に平文で残るため避けてください）。
