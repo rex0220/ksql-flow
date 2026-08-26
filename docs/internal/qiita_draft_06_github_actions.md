@@ -138,6 +138,14 @@ schedule 起動時には `resume` が指定されないため、この構成で�
 
 ## 有効化手順（テンプレート利用者向け・3 分）
 
+### Secrets と Variables とは
+
+**Secrets** は、リポジトリに**暗号化して保存する秘密値の置き場**です。ワークフロー実行時だけ `${{ secrets.名前 }}` で参照でき、実行ログに値が出そうになると自動でマスクされます（`***` 表示）。一度保存すると**値は二度と表示されず**、上書きだけができます。本構成では kintone の API トークンをここに置きます — [#4](https://qiita.com/rex0220/items/d0a66c133edd42ff91c4) でサーバーの `.env` に置いたものの、GitHub 版の置き場だと考えてください（YAML やコードにトークンを書かないための仕組み）。
+
+**Variables** は同じ場所にある**平文の設定値**です。マスクされないので秘密には使えませんが、`KSQL_ACTIONS_ENABLED` のような ON/OFF フラグに向いています。
+
+### 設定するもの
+
 リポジトリの Settings → Secrets and variables → Actions で:
 
 1. **Variables**: `KSQL_ACTIONS_ENABLED` = `true`
@@ -145,7 +153,25 @@ schedule 起動時には `resume` が指定されないため、この構成で�
 
 このうち **`KSQL_TOKEN_LOGS_RO` だけは本記事で初登場**です。[#2](https://qiita.com/rex0220/items/3a1213a596a8c49b67aa) までの構成で発行済みの閲覧のみトークンは案件管理・顧客管理の 2 つ（MCP 用 — MCP はログアプリを参照しないため）でした。pr-check はログアプリを含む config 全体を閲覧のみで解決する必要があるので、**ログアプリでも「レコード閲覧」のみのトークンを追加発行**してください（1 分。テンプレートの `.env.example` にも追記済みです）。
 
-CLI 派なら `gh variable set` / `gh secret set` で同じことができます。トークン値は書込可を含むので、扱いは #4 のサーバー `.env` と同格 — GitHub の Secrets は暗号化保存・ログ自動マスクですが、リポジトリの管理権限を持つ人が実行内容を変えられる点は意識してください（保護ブランチ + 必須レビューで main へのマージを守るのがセットです）。
+### 設定のやり方は 2 通り
+
+**A. Web UI** — Settings → Secrets and variables → Actions を開き:
+
+1. **Variables タブ** → New repository variable → Name `KSQL_ACTIONS_ENABLED`・Value `true` → Add
+2. **Secrets タブ** → New repository secret → Name（例 `KSQL_TOKEN_DEALS`）と Value（トークン値を貼り付け）→ Add。これを 6 つ分繰り返す
+
+**B. GitHub CLI（gh）** — まとめて設定するならこちらが速いです:
+
+```bash
+gh variable set KSQL_ACTIONS_ENABLED --body "true"
+gh secret set KSQL_TOKEN_DEALS        # 実行すると値の入力を促される（画面に表示されない）
+gh secret set KSQL_TOKEN_CUSTOMERS
+# …残り 4 つも同様
+```
+
+`gh secret set 名前` は値を対話プロンプトで受け取るので、コマンド履歴やターミナル画面にトークンが残りません（`--body "値"` で渡すと履歴に平文で残るため避けてください）。
+
+トークン値は書込可を含むので、扱いは #4 のサーバー `.env` と同格です。GitHub の Secrets は暗号化保存・ログ自動マスクですが、**リポジトリの管理権限を持つ人はワークフローを書き換えて実行内容を変えられる**点は意識してください（保護ブランチ + 必須レビューで main へのマージを守るのがセットです）。
 
 ## まとめ
 
