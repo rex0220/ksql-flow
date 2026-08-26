@@ -29,6 +29,38 @@ tags:
 | `pr-check.yml` | **マージ前の門番** | PR（jobs/・config の変更時） | `validate-all` → `run-all --dry-run --json` → **差分プレビューを PR に自動コメント** |
 | `daily-batch.yml` | **マージ後の実行係** | 毎朝 6:07 JST + 手動 | checkout → `npm ci` → `run-all ./jobs`。手動実行時は `--resume` チェックボックス付き |
 
+しくみの全体像は 1 枚にするとこうです（トークンの分離と失敗時の流れは後述）:
+
+```mermaid
+flowchart TB
+    subgraph dev["開発機（#2 の構成）"]
+        AI["VSCode + Claude Code<br>ジョブ作成 → dry-run"]
+    end
+    subgraph gh["GitHub（private リポジトリ）"]
+        PR["Pull Request"]
+        CHK["pr-check（門番）<br>validate-all + dry-run<br>閲覧のみトークン"]
+        CMT["差分を自動コメント<br>+INSERT / ~UPDATE / -DELETE"]
+        MAIN["main ブランチ"]
+        DB["daily-batch（実行係）<br>毎朝 6:07 JST・書込可 Secrets"]
+        PR --> CHK --> CMT
+        PR -->|"レビュー → merge"| MAIN
+        MAIN -->|"schedule / 手動（resume）"| DB
+    end
+    subgraph kin["kintone"]
+        APPS["業務アプリ<br>読取・書込"]
+        LOG["実行ログアプリ<br>BATCH / JOB・分散ロック"]
+        NTF["条件通知（2 条件）"]
+        LOG --> NTF
+    end
+    GRP["ジョブ管理グループ<br>ポータル・メール"]
+
+    AI -->|"push"| PR
+    CHK -.->|"読取のみ（書込ゼロ）"| APPS
+    DB --> APPS
+    DB -->|"実行記録・status"| LOG
+    NTF -->|"失敗時"| GRP
+```
+
 どちらも**既定では無効**です。リポジトリ変数 `KSQL_ACTIONS_ENABLED = true` を置いたときだけ動きます。
 
 なぜオプトインにしたか — テンプレートから作った直後のリポジトリは Secrets 未設定で、そのまま schedule が発火すると**毎晩失敗して失敗メールが届き続ける**からです。ガードは job レベルの `if` 1 行:
