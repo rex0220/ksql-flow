@@ -16,7 +16,10 @@ tags:
 
 この構成の見どころは定期実行そのものより、**PR を開くと kintone への書込差分が自動でコメントされる**ことです。ジョブ SQL のレビューが「SQL を読んで影響を想像する」から「**差分の表を見る**」に変わります。
 
-<!-- TODO: PR コメントのスクリーンショット（実機検証後） -->
+実機の PR がこれです — コメント 1 行だけの変更 PR に、bot が「このジョブが毎朝何件書くか」を貼ってきます:
+
+![2026-08-26_22h10_45.png](https://qiita-image-store.s3.ap-northeast-1.amazonaws.com/0/100572/72ab9686-81ab-4fac-9b90-2c0ad2498702.png)
+
 
 ## 同梱ワークフローは 2 本
 
@@ -166,6 +169,14 @@ schedule 起動時には `resume` が指定されないため、この構成で�
 | 失敗系 PR（ASSERT 違反ジョブ入り） | pr-check **failure（赤）**。コメントに ABORTED 行 + 「Exit Code: 2（0 以外 — マージ前に要確認）」— マージ前に止まる |
 | resume 実行（チェックボックス ON） | `--resume` が付与され「元セッションの as-of を引き継ぎます」→ 失敗なしのため「再実行が必要なジョブはありません」で正常終了 |
 | schedule 自然発火（6:07 設定） | <!-- TODO: 明朝の実測（実際の起動時刻・遅延） --> |
+
+失敗系 PR の実際の画面です。コミットに赤い ✕（pr-check failure）が付き、コメントの表に `ABORTED` と「Exit Code: 2（0 以外 — マージ前に要確認）」が並びます:
+
+![2026-08-26_22h11_17.png](https://qiita-image-store.s3.ap-northeast-1.amazonaws.com/0/100572/6f0dec86-4adb-49e0-b61d-b7ef89d61c8a.png)
+
+検証後の PR 一覧が門番の運用結果をそのまま示しています — ✕ の失敗系はマージせず閉じ、✓ はレビューを経てマージ済み:
+
+![image.png](https://qiita-image-store.s3.ap-northeast-1.amazonaws.com/0/100572/6f384569-c0e1-4908-af18-2cea5bf7045f.png)
 
 
 ## 有効化手順（テンプレート利用者向け・3 分）
