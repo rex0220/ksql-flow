@@ -56,6 +56,8 @@ env:
 
 [#2](https://qiita.com/rex0220/items/3a1213a596a8c49b67aa) の開発機の分離（AI には閲覧のみ・本実行だけ人間の書込トークン）と同じ思想を、CI では「**マージ前 = 閲覧のみ・マージ後 = 書込可**」に写した形です。dry-run は書込ゼロで読取 API しか使わないので、閲覧のみトークンで完結します。
 
+なお **fork からの PR には GitHub の仕様上 Secrets が渡りません**（閲覧のみトークンであっても）。テンプレート推奨どおり private リポジトリ + 同一リポジトリ内ブランチの PR で運用していれば影響はありませんが、public で外部コントリビューションを受ける形にした場合、fork PR の pr-check は失敗またはスキップになります — これは欠陥ではなく「レビュー前の外部コードに Secrets を渡さない」という GitHub 側の同じ思想の防御です。
+
 ## PR に貼られる差分コメント
 
 pr-check の最終ステップが `run-all --dry-run --json` の出力を整形して PR にコメントします（actions/github-script・追加サービス不要）:
@@ -89,6 +91,25 @@ GitHub Actions の schedule は**ベストエフォート**です。実行時刻
 失敗通知に Actions 側の仕掛けは**不要**です。[#4 で組んだ kintone 標準の条件通知](https://qiita.com/rex0220/items/d0a66c133edd42ff91c4)（ログアプリに 2 条件）は、**実行環境がどこであっても同じように働きます** — ランナーがログアプリに FAILED 系レコードを書いた瞬間に通知が飛ぶ仕組みだからです。スケジューラを乗り換えても通知・記録・排他・復旧が変わらない、これが「運用装備はランナーが持つ」設計の配当です。
 
 復旧は Actions の画面から: daily-batch の「Run workflow」に **resume チェックボックス**を付けてあります。ON で実行すると `run-all --resume` になり、前回失敗分だけを**元の as-of を引き継いで**再実行します（自動リトライを仕掛けない理由は #4 と同じ — 業務異常は再実行しても直りません）。
+
+チェックボックスの実装はこれだけです — `workflow_dispatch` の boolean input を、式で CLI 引数に展開します:
+
+```yaml
+on:
+  schedule:
+    - cron: '7 21 * * *'   # 21:07 UTC = 翌朝 6:07 JST（0 分を避ける）
+  workflow_dispatch:
+    inputs:
+      resume:
+        description: "前回失敗分のみ再実行（--resume・元の as-of を引き継ぐ）"
+        type: boolean
+        default: false
+# ...
+      - name: run-all
+        run: npx --no-install ksql-flow run-all ./jobs --profile prod ${{ inputs.resume == true && '--resume' || '' }}
+```
+
+schedule 起動時は `inputs` が空なので式は `''` に落ち、通常実行になります。
 
 <!-- TODO: 実機検証後に記入 —
 ## 実機検証の記録
