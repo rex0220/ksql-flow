@@ -56,11 +56,19 @@ env:
 
 [#2](https://qiita.com/rex0220/items/3a1213a596a8c49b67aa) の開発機の分離（AI には閲覧のみ・本実行だけ人間の書込トークン）と同じ思想を、CI では「**マージ前 = 閲覧のみ・マージ後 = 書込可**」に写した形です。dry-run は書込ゼロで読取 API しか使わないので、閲覧のみトークンで完結します。
 
-なお **fork からの PR には GitHub の仕様上 Secrets が渡りません**（閲覧のみトークンであっても）。テンプレート推奨どおり private リポジトリ + 同一リポジトリ内ブランチの PR で運用していれば影響はありませんが、public で外部コントリビューションを受ける形にした場合、fork PR の pr-check は失敗またはスキップになります — これは欠陥ではなく「レビュー前の外部コードに Secrets を渡さない」という GitHub 側の同じ思想の防御です。
+なお **通常、fork からの PR には Secrets は渡されません**（閲覧のみトークンであっても）。private リポジトリでは管理設定で fork PR への Secrets 提供を変えられますが、本構成では「外部のレビュー前コードへ Secrets を渡さない」運用を前提にします。テンプレート推奨どおり private + 同一リポジトリ内ブランチの PR なら影響はなく、public で外部コントリビューションを受ける形にした場合は fork PR の pr-check が失敗またはスキップになります — これは欠陥ではなく、本節と同じ思想の GitHub 側の既定の防御です。
 
 ## PR に貼られる差分コメント
 
-pr-check の最終ステップが `run-all --dry-run --json` の出力を整形して PR にコメントします（actions/github-script・追加サービス不要）:
+pr-check の最終ステップが `run-all --dry-run --json` の出力を整形して PR にコメントします（actions/github-script・追加サービス不要）。ここで登場するトークンは kintone のものではなく **GitHub の `GITHUB_TOKEN`** です — この workflow では最小権限を明示しています:
+
+```yaml
+permissions:
+  contents: read        # checkout 用
+  pull-requests: write  # PR コメント用
+```
+
+kintone API トークン（RO/RW）と GitHub 側のトークンは別物なので混同に注意してください。組織設定で `GITHUB_TOKEN` の既定権限を絞っている環境では、この `permissions` 宣言がないとコメント投稿が 403 になります — 宣言しておけば環境差に依存しません。コメントの中身:
 
 <!-- TODO: 実機検証後に実際のコメント Markdown / スクリーンショットに差し替え -->
 
@@ -109,7 +117,7 @@ on:
         run: npx --no-install ksql-flow run-all ./jobs --profile prod ${{ inputs.resume == true && '--resume' || '' }}
 ```
 
-schedule 起動時は `inputs` が空なので式は `''` に落ち、通常実行になります。
+schedule 起動時には `resume` が指定されないため、この構成では通常実行になります。
 
 <!-- TODO: 実機検証後に記入 —
 ## 実機検証の記録
