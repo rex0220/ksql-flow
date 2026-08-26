@@ -29,14 +29,14 @@ tags:
 | `pr-check.yml` | **マージ前の門番** | PR（jobs/・config の変更時） | `validate-all` → `run-all --dry-run --json` → **差分プレビューを PR に自動コメント** |
 | `daily-batch.yml` | **マージ後の実行係** | 毎朝 6:07 JST + 手動 | checkout → `npm ci` → `run-all ./jobs`。手動実行時は `--resume` チェックボックス付き |
 
-しくみの全体像は 1 枚にするとこうです（トークンの分離と失敗時の流れは後述）:
+しくみの全体像は 1 枚にするとこうです。登場するリポジトリは 1 つだけ — #2 でテンプレートから作った **あなたの `my-ksql-jobs`**（private）で、開発機はその clone、GitHub Actions はその上で動きます（トークンの分離と失敗時の流れは後述）:
 
 ```mermaid
 flowchart TB
-    subgraph dev["開発機（#2 の構成）"]
+    subgraph dev["開発機 — my-ksql-jobs の clone（#2 の構成）"]
         AI["VSCode + Claude Code<br>ジョブ作成 → dry-run"]
     end
-    subgraph gh["GitHub（private リポジトリ）"]
+    subgraph gh["GitHub — あなたの my-ksql-jobs（private・#2 でテンプレートから作成）"]
         PR["Pull Request"]
         CHK["pr-check（門番）<br>validate-all + dry-run<br>閲覧のみトークン"]
         CMT["差分を自動コメント<br>+INSERT / ~UPDATE / -DELETE"]
