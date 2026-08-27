@@ -34,6 +34,37 @@ VPS が向くのは「**社内サーバーは無い・時刻は正確に・自�
 
 なお「共有レンタルサーバーではどうか」もよく聞かれます。SSH と cron が使えるプランはありますが、**OS・Node.js の導入方法・Docker の可否・権限や通信の制約が VPS と異なるため、本記事の手順をそのまま適用する用途には向きません**。たとえばさくらのレンタルサーバは FreeBSD で Node.js の公式バイナリが無く（ソースからのコンパイル等が必要）、Docker も使えず、国外 IP アドレスフィルターの設定によっては GitHub など海外サービスとの連携に追加設定が要ります。
 
+しくみの全体像は 1 枚にするとこうです（#4・#6 と見比べると、**サーバーの箱が入れ替わっただけで kintone 側は同一**であることが分かります）:
+
+```mermaid
+flowchart TB
+    subgraph dev["開発機 — my-ksql-jobs の clone（#2 の構成）"]
+        AI["VSCode + Claude Code<br>ジョブ作成 → dry-run"]
+    end
+    REPO["GitHub — あなたの my-ksql-jobs（private）<br>PR で pr-check だけ動かす構成も可"]
+    subgraph vps["VPS（Ubuntu 24.04・月 1,000 円）"]
+        CRON["cron<br>毎朝 6:07 JST・遅延 1 秒"]
+        SH["run_batch.sh<br>cd \"$(dirname \"$0\")\" 基準"]
+        RUN["ksql-flow run-all<br>トークンは .env（chmod 600）"]
+        UPG["unattended-upgrades<br>更新は自動・再起動は要設定"]
+        CRON --> SH --> RUN
+        RUN -.->|"Exit Code をそのまま返す"| CRON
+    end
+    subgraph kin["kintone"]
+        APPS["業務アプリ<br>読取・書込"]
+        LOG["実行ログアプリ<br>BATCH / JOB・分散ロック"]
+        NTF["条件通知（2 条件）"]
+        LOG --> NTF
+    end
+    GRP["ジョブ管理グループ<br>ポータル・メール"]
+
+    AI -->|"PR → merge"| REPO
+    REPO -->|"git clone / pull"| vps
+    RUN --> APPS
+    RUN -->|"実行記録・status"| LOG
+    NTF -->|"失敗時"| GRP
+```
+
 ### 既存の VPS に相乗りさせるか
 
 すでに VPS を持っているなら、そこに同居させたくなります。**判断はメモリの空きだけ見れば十分**です。
