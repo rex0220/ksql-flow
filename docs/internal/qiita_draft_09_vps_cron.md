@@ -44,7 +44,7 @@ flowchart TB
     REPO["GitHub — あなたの my-ksql-jobs（private）<br>PR で pr-check だけ動かす構成も可"]
     subgraph vps["VPS（Ubuntu 24.04・月 1,000 円）"]
         CRON["cron<br>毎朝 6:07 JST・遅延 1 秒"]
-        SH["run_batch.sh<br>cd \"$(dirname \"$0\")\" 基準"]
+        SH["run_batch.sh<br>スクリプト自身のディレクトリへ移動"]
         RUN["ksql-flow run-all<br>トークンは .env（chmod 600）"]
         UPG["unattended-upgrades<br>更新は自動・再起動は要設定"]
         CRON --> SH --> RUN
