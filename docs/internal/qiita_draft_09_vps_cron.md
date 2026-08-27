@@ -133,7 +133,12 @@ fail2ban-client status sshd
 
 イメージやプロバイダによって異なる可能性があるので、**自分の環境で `systemctl is-active fail2ban` と上の `status sshd` を確認しておく**と安心です。
 
-SSH の認証失敗は BAN 対象になり得ます。**コンソールという逃げ道が常にある**ことだけは覚えておいてください（BAN の解除も `fail2ban-client set sshd unbanip <IP>` でコンソールから可能です）。オフィスや VPN に固定 IP があるなら、`/etc/fail2ban/jail.local` の `ignoreip` にそれを足しておくと自分を締め出す事故を防げます。
+SSH の認証失敗は BAN 対象になり得ます。**コンソールという逃げ道が常にある**ことだけは覚えておいてください（BAN の解除も `fail2ban-client set sshd unbanip <IP>` でコンソールから可能です）。管理端末や VPN の出口など**信頼できる固定 IP に限って**、`/etc/fail2ban/jail.local` で除外しておくと自分を締め出す事故を防げます（`[DEFAULT]` に書けば全 jail 共通、SSH だけなら `[sshd]` に書きます）:
+
+```ini
+[DEFAULT]
+ignoreip = 127.0.0.1/8 ::1 203.0.113.10
+```
 
 ### 2. Windows から SSH するなら鍵の ACL を絞る
 
