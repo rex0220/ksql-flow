@@ -1,8 +1,8 @@
 # kintone 実行指示ポーラー実装計画
 
-* 作成: 2026-08-27
+* 作成: 2026-08-27（Codex）／**改訂: 2026-08-27**（Claude Code レビュー指摘を反映）
 * 対象: kSQL Flow v0.4.0 を利用する VPS / オンプレのジョブリポジトリ
-* 状態: 実装前計画
+* 状態: **実装着手可**（レビュー: `reviews/poll_control_plan_review_claudecode-20260827.md`）
 * 正: `rerun_trigger_design.md` v4。Q8・Q9・Q10 は裁定済みであり、本計画では再提案しない
 * 関連: `ksql_flow_spec.md` §5.5・§6・§8・§10.3、`qiita_draft_09_vps_cron.md`
 
@@ -99,7 +99,7 @@ REST API と状態遷移の本体は、依存パッケージを追加しない E
 | 終了コード | `exit_code` | 数値 | 任意 | 空、整数 | kSQL Flow の Exit Code |
 | 結果要約 | `result_summary` | 文字列（複数行） | 任意 | 空 | allowlist から選ぶ固定文言だけを格納 |
 | 実行ログ URL | `log_url` | リンク | 任意 | Web サイトリンク、空 | ログアプリの検索画面への固定生成リンク |
-| 実行時 git_ref | `executed_git_ref` | 文字列（1行） | 任意 | 空 | 記録だけに使い、実行可否には使わない |
+| 実行時 git_ref | `executed_git_ref` | 文字列（1行） | 任意 | 空 | **ログアプリの BATCH から転記**。記録だけに使い、実行可否には使わない |
 
 `$id`、`$revision`、`作成者`、`作成日時`、`更新者`、`更新日時` は kintone のシステムフィールドを利用する。独自の依頼者フィールドは作らない。`$revision` は claim と結果更新の楽観ロックに、`作成日時` は FIFO と有効期限に使う。
 
@@ -140,7 +140,8 @@ REST API と状態遷移の本体は、依存パッケージを追加しない E
 | 自ホストキー | 同上 | `vps-batch-01` | kintone ドロップダウンおよび `os.hostname()` との一致を起動前検証 |
 | profile allowlist | 同上 | `prod` / `stg` をキーとする map | レコード値をパスへ変換しないため |
 | profile ごとの command / args / cwd | 同上 | すべて絶対パス、args は `['--resume']` 固定 | allowlist の値はローカル設定だけに置く |
-| 指示有効期限 | 同上 | 21,600 秒（6時間） | v4 §4.5 の受付期限 |
+| 指示有効期限 | 同上 | 21,600 秒（6時間） | v4 §4.5 の受付期限。**ポーリング空白時間より長いこと**（§9.1） |
+| ポーリング空白時間の申告 | 同上 | 既定 300 秒（終日 5 分間隔） | 有効期限との整合を起動時に検証するための宣言値 |
 | claim 期限 | 同上 | `batchTimeoutSec + 600秒` | ランナー上限より先に stale 扱いしない |
 | profile ごとの受付待ち上限 | 同上 | 3件 | 連投時の実行回数を抑える |
 | 1回の overflow 取消上限 | 同上 | 3件 | 攻撃時にも更新 API 数を有限にする |
@@ -151,7 +152,7 @@ REST API と状態遷移の本体は、依存パッケージを追加しない E
 
 profile map の各値は、たとえば command が `/opt/ksql/my-ksql-jobs/run_batch.sh`、args が `--resume`、cwd が `/opt/ksql/my-ksql-jobs` という完全な固定値を持つ。`target_profile = prod` は map のキー検索にだけ使い、`/opt/.../${target_profile}` のような補間は禁止する。自ホストキーは kSQL Flow v0.4.0 がログアプリの `host` に記録する `os.hostname()` と完全一致させ、指示と BATCH レコードを同じ値で照合する。
 
-起動時に設定全体を検証し、不明キー、相対パス、`--resume` 以外の argv、重複 profile、非 HTTPS URL、範囲外の上限、未定義の環境変数があれば API 呼び出し前に停止する。`claim` 期限は、対応する `ksql.config.json` の `limits.batchTimeoutSec` 変更時に同じ PR で見直す。第1段階ではランナー設定の内部構造へ依存して自動読込しない。
+起動時に設定全体を検証し、不明キー、相対パス、`--resume` 以外の argv、重複 profile、非 HTTPS URL、範囲外の上限、未定義の環境変数があれば API 呼び出し前に停止する。**指示有効期限がポーリング空白時間以下の場合も停止する** — この組み合わせは「拾う前に必ず期限切れになる」設定であり、§9.1 の事故を構成上防ぐ。`claim` 期限は、対応する `ksql.config.json` の `limits.batchTimeoutSec` 変更時に同じ PR で見直す。第1段階ではランナー設定の内部構造へ依存して自動読込しない。
 
 ## 6. ポーラーの処理フロー
 
@@ -170,14 +171,14 @@ profile map の各値は、たとえば command が `/opt/ksql/my-ksql-jobs/run_
 
 「結果更新不能」の場合は kintone 自体へ状態を書けないため、実レコードは一時的に `実行中` のまま残る。次回到達時の stale 回収で `結果不明` に収束させる。自動で `受付待ち` に戻して再実行はしない。
 
-Exit 1 は設定・検証エラー、Exit 4 は部分成功であり、いずれも人間の確認が必要なので指示状態は `失敗` とする。v4 で定めた主要経路 0 / 2 / 3 / 5 の意味は変更しない。signal 終了や 0〜5 以外は成功・失敗を断定せず `結果不明` とする。
+Exit 4 は部分成功であり、人間の確認が必要なので指示状態は `失敗` とする。Exit 1 も `失敗` とするが、**文言で原因を断定しない**。`--resume` は設定・検証エラーだけでなく「再開できる直近バッチの実行記録が見つからない」場合にも Exit 1 を返す（`runAll.ts` の `--resume に必要な直近バッチの実行記録が見つかりません`）ためで、「VPS の設定を確認せよ」と書くと依頼者を誤った方向へ誘導する。v4 で定めた主要経路 0 / 2 / 3 / 5 の意味は変更しない。signal 終了や 0〜5 以外は成功・失敗を断定せず `結果不明` とする。
 
 書き戻す要約は次の固定辞書とし、子プロセスや API の出力を連結しない。
 
 | 終了 | `result_summary` の固定文言 |
 | --- | --- |
 | 0 | `リランが正常終了しました。実行ログアプリを確認してください。` |
-| 1 | `設定または検証エラーで終了しました。VPS の設定とジョブを確認してください。` |
+| 1 | `リランを開始できませんでした（設定・検証エラー、または再開できる直近バッチが見つかりません）。実行ログアプリを確認してください。` |
 | 2 | `業務アサート違反で安全停止しました。対象データを確認してください。` |
 | 3 | `実行時エラーで終了しました。基盤と実行ログアプリを確認してください。` |
 | 4 | `一部のジョブが失敗しました。実行ログアプリを確認してください。` |
@@ -223,11 +224,10 @@ poll_control.mjs:
     Exit 0
 
   profile allowlist から固定 command / args / cwd / claimTimeout を取得
-  git rev-parse は cwd を固定して argv 配列で実行し、hash だけ検証
 
   revision 付き PUT で claim:
     状態=実行中、確保ホスト、自ホスト、確保期限、実行開始日時、
-    試行回数+1、git_ref、前回結果フィールドをクリア
+    試行回数+1、前回結果フィールドをクリア
   revision 競合なら誰かが確保したため、起動せず Exit 0
   応答の新 revision を保持
 
@@ -236,7 +236,10 @@ poll_control.mjs:
   終了 code / signal を受け取る
 
   Exit 5 以外でログアプリを 1 回検索し、
-    profile・host・claim 後の started_at に合う最新 BATCH の batch_id を取得
+    profile・host・claim 後の started_at に合う BATCH の
+    batch_id と git_ref を取得（fields で限定）
+    該当 0 件 → 両方とも空欄のまま正常終了（下の注記）
+    該当 2 件以上 → 帰属を断定せず空欄にする（下の注記）
   batch_id が取れた場合だけ固定形式のログ検索 URL を生成
 
   exitMap から state と固定 result_summary を選ぶ
@@ -249,6 +252,13 @@ poll_control.mjs:
   revision 競合または API 障害なら秘密を含まないローカル警告だけを出し、
     次回 stale 回収に委ねて非 0 終了
 ```
+
+**実行バッチ照合が空欄になる 2 つの正常系**（実装者が異常と誤解しないこと）:
+
+* **該当 0 件** — `--resume` は再実行対象が無ければ BATCH レコードを作らずに Exit 0 で終わる。`runAll.ts` は resume 選抜の直後（`--resume: 再実行が必要なジョブはありません`）で return し、BATCH レコードの作成はそれより後段だからである。**指示は `完了` でよく、`execution_batch_id` は空欄が正しい**
+* **該当 2 件以上** — claim から結果書き戻しまでの間に定期 cron のバッチが割り込むと、同一 host・同一 profile の BATCH が複数並ぶ。この 2 つは host / profile では区別できないため、**帰属を断定せず空欄にする**。誤ったバッチへのリンクを出すより空欄のほうが安全である
+
+`executed_git_ref` はポーラーから `git` を起動して取得しない。**ランナー自身が BATCH レコードへ `git_ref` を記録している**（`runAll.ts` の `git_ref: resolveGitRef(dir)`）ため、上の照合 GET の `fields` に含めれば **API 消費を増やさずに**取得できる。子プロセス起動が 1 つ減り、§8.1 で守るべき攻撃面も減る。照合が空欄になる場合は `executed_git_ref` も空欄とする。
 
 stale 回収は `結果不明` にするだけで再実行しない。ログアプリの `execution_batch_id` と実行指示の時刻を人間が照合し、必要なら新しい指示を追加する。これは at-least-once であって exactly-once ではない。
 
@@ -263,7 +273,7 @@ stale 回収は `結果不明` にするだけで再実行しない。ログア�
 | stale / 期限切れ / overflow 更新 | `PUT /k/v1/record.json` | `app`, `id`, `revision`, 許可された固定 `record` | 対象1件につき1、各設定上限まで |
 | claim | `PUT /k/v1/record.json` | `app`, `id`, 取得した `revision`, claim fields | 起動候補1件につき1 |
 | 結果書き戻し | `PUT /k/v1/record.json` | `app`, `id`, claim 応答の `revision`, result fields | claim 成功時1 |
-| 実行バッチ照合 | `GET /k/v1/records.json`（ログアプリ） | `record_type = BATCH`, `profile`, `host`, `started_at`, order/limit、必要 fields のみ | claim 成功かつ Exit 5 以外で最大1 |
+| 実行バッチ照合 | `GET /k/v1/records.json`（ログアプリ） | `record_type = BATCH`, `profile`, `host`, `started_at`, order/limit。`fields` は `batch_id` と `git_ref` に限定 | claim 成功かつ Exit 5 以外で最大1 |
 
 ゲストスペースを使う場合だけ `/k/guest/{guestSpaceId}/v1/...` に固定変換する。API トークンは `X-Cybozu-API-Token` ヘッダーで送り、URL、本文、例外、ログへ出さない。
 
@@ -288,7 +298,7 @@ overflow と stale が同じ回に複数ある場合でも、更新件数は設�
 * `command`、`args`、`cwd` は検証済みローカル設定からのみ取得し、すべて絶対パスとする
 * `args` は第1段階では正確に `--resume` だけを許可する
 * `exec`、`execSync`、`sh -c`、テンプレート文字列で作ったコマンドは lint 相当のレビュー検索とテストで禁止する
-* `git_ref` 取得も固定 `/usr/bin/git` と `['-C', fixedCwd, 'rev-parse', 'HEAD']` のような argv 配列にする。失敗しても実行は止めず空欄にする
+* **ポーラーが起動する子プロセスは `run_batch.sh` の 1 つだけ**とする。`git` は起動しない（`git_ref` はログアプリの BATCH レコードから取得する — §6.2）
 
 ### 8.2 レコード値は allowlist キーだけに使う
 
@@ -328,12 +338,35 @@ overflow と stale が同じ回に複数ある場合でも、更新件数は設�
 
 ```cron
 7 6 * * * /opt/ksql/my-ksql-jobs/run_batch.sh >> /var/log/ksql/batch.log 2>&1
-*/5 7-20 * * 1-5 /opt/ksql/my-ksql-jobs/scripts/poll_control.sh >> /var/log/ksql/poll-control.log 2>&1
+*/5 * * * * /opt/ksql/my-ksql-jobs/scripts/poll_control.sh >> /var/log/ksql/poll-control.log 2>&1
 ```
 
 `poll_control.sh` は自身のディレクトリからリポジトリルートを固定的に解決し、`/usr/bin/flock`、`/usr/bin/node --env-file=<固定 .env> <固定 poll_control.mjs> --config <固定 config>` を `exec` する。実際の絶対パスは `command -v node` と `command -v flock` で配備時に確認してからテンプレート値を置換する。
 
-営業時間外もスマホ操作を受ける運用なら `*/5 * * * *` とする。この選択は API 消費が 156回/日（平日7〜20時の例）か 288回/日（終日）かに影響するため、cron と運用手順に明記する。ログは kintone が正であり、`poll-control.log` は logrotate 対象にする。
+### 9.1 既定は終日ポーリングとする
+
+**ポーリング時間帯を営業時間・平日に絞ってはならない。** この設計が解こうとしている問題は `rerun_trigger_design.md` §1 のとおり **「休日・外出先で、通知は届くのに直せない」** ことであり、平日 7〜20 時限定のポーリングは**その状況でだけ動かない**。
+
+有効期限（§5.2）と組み合わさると失敗する。
+
+* 土曜 9:00 に指示を追加 → 次のポーリングは月曜 7:00
+* 既定の有効期限 6 時間は土曜 15:00 に切れている
+* 月曜 7:00 のポーラーは `期限切れ` にするだけで、**何も実行しない**
+
+したがって既定は `*/5 * * * *`（終日・288 回/日）とする。指示アプリは専用アプリであり、日次上限（スタンダードコース 10,000 回）に対して **2.9%** なので終日でも余裕がある。
+
+営業時間帯に絞る運用を選ぶ場合は、**有効期限をポーリング空白時間より長く取る**こと（週末を挟むなら 72 時間以上）。この 2 つは独立に設定できてしまうため、§5.2 の起動時検証で整合を強制する。
+
+`poll-control.log` は logrotate 対象にする。ログの正は kintone 側である。
+
+### 9.2 GitHub Actions（#6）との関係
+
+配備先の多くは #6 のワークフローを併用している。
+
+* **ワークフローファイルの変更は不要**（`daily-batch.yml` / `pr-check.yml` とも）
+* **復旧目的で Actions を残す必要がなくなる。** #9 では「復旧用に `workflow_dispatch` を残すなら書込可トークンを GitHub Secrets にも置く必要があり、露出面が減るという利点とのトレードオフ」と書いた。本ポーラーがあれば **GitHub には閲覧のみトークンだけ**という構成が完全に成立する（`rerun_trigger_design.md` の案 A は役目を終える）
+* **定期実行の主は 1 つに決める。** Actions の `daily-batch` と VPS の cron を両方有効にすると二重スケジュールになる。ポーラーが加わり起動経路は 4 つ（cron・ポーラー・Actions・SSH）になるため、運用手順に明記する。衝突自体はログアプリの分散ロックが Exit 5 で止め、ポーラーは `target_host` でルーティングされるので Actions が指示を拾うことはない
+* Actions 側に本ポーラーは載せない。実行環境が使い捨てでポーリングが成立せず、そもそもブラウザからの `workflow_dispatch` がある
 
 ## 10. テスト計画
 
@@ -351,11 +384,12 @@ Node 22 の `node:test` とローカル HTTP モックを使い、実 kintone �
 * stale: 期限前は触らず、期限後は `結果不明`、自動再起動しないこと
 * DoS: profile 上限、1回1起動、overflow/stale/API 取得 limit が設定上限を超えないこと
 * 秘密: token、API エラー本文、子 stdout/stderr、悪意あるレコード値が PUT 本文とポーラーログに現れないこと
-* 実行バッチ照合: claim より前、別 host/profile、JOB レコードを除外し、該当なしは空欄で安全に完了すること
+* 実行バッチ照合: claim より前、別 host/profile、JOB レコードを除外し、**該当 0 件（resume 対象なし）と該当 2 件以上（cron 割り込み）はいずれも空欄で `完了`** すること。`executed_git_ref` も同じ GET から取れ、`git` を起動しないこと
+* 設定整合: 指示有効期限がポーリング空白時間以下なら API 呼び出し前に停止すること（§9.1）
 * HTTP: timeout、429、5xx、revision 競合、応答喪失、非 JSON、巨大応答、同一 origin 外 redirect
 * `flock`: 2プロセスを同時起動して片方だけが API モックへ到達すること
 
-子プロセスは Exit Code だけを返す偽 `run_batch.sh` を一時ディレクトリに置き、kSQL Flow 本体を変更せずに試験する。実装ファイルの静的検索でも `sh -c`、`exec(`、文字列 command、トークン出力がないことを確認する。
+子プロセスは Exit Code だけを返す偽 `run_batch.sh` を一時ディレクトリに置き、kSQL Flow 本体を変更せずに試験する。実装ファイルの静的検索でも `sh -c`、`exec(`、文字列 command、トークン出力、**`git` の起動**がないことを確認する。
 
 ### 10.2 VPS 実機でしか確認できないこと
 
