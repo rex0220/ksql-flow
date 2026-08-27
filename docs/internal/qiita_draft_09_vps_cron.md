@@ -133,7 +133,7 @@ fail2ban-client status sshd
 
 イメージやプロバイダによって異なる可能性があるので、**自分の環境で `systemctl is-active fail2ban` と上の `status sshd` を確認しておく**と安心です。
 
-SSH の認証失敗は BAN 対象になり得ます。**コンソールという逃げ道が常にある**ことだけは覚えておいてください（BAN の解除も `fail2ban-client set sshd unbanip <IP>` でコンソールから可能です）。
+SSH の認証失敗は BAN 対象になり得ます。**コンソールという逃げ道が常にある**ことだけは覚えておいてください（BAN の解除も `fail2ban-client set sshd unbanip <IP>` でコンソールから可能です）。オフィスや VPN に固定 IP があるなら、`/etc/fail2ban/jail.local` の `ignoreip` にそれを足しておくと自分を締め出す事故を防げます。
 
 ### 2. Windows から SSH するなら鍵の ACL を絞る
 
@@ -241,6 +241,8 @@ exec node --env-file=.env node_modules/@rex0220/ksql-flow/dist/cli.js run-all ./
 - **`"$@"` で引数を素通し** — cron からは引数なしで、復旧時は `./run_batch.sh --resume` で呼べます（後述）
 - **自動再起動は設定しない**。復旧は [#7](https://qiita.com/rex0220/items/39821af2a79b88de0ed2) の `--resume` に一本化
 
+clone した直後は**実行権限が落ちていることがある**ので、`chmod +x run_batch.sh` を一度実行しておきます（cron から呼ぶと `Permission denied` で気づきます）。
+
 別ディレクトリから実行して、正しく動くことを確認します:
 
 ```bash
@@ -259,6 +261,8 @@ crontab -e
 ```cron
 7 6 * * * /opt/ksql/my-ksql-jobs/run_batch.sh >> /var/log/ksql/batch.log 2>&1
 ```
+
+なお、このログは追記し続けると際限なく太るので、**正は kintone の実行ログアプリ**と割り切り、`/etc/logrotate.d/ksql` を置くか定期削除するかを決めておいてください。
 
 **タイムゾーンの確認だけしてください** — ConoHa の Ubuntu イメージは最初から `Asia/Tokyo` でした:
 
