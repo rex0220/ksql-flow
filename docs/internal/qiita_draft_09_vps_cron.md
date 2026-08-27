@@ -124,6 +124,27 @@ node --env-file=.env node_modules/@rex0220/ksql-flow/dist/cli.js validate --chec
 
 > **root 運用について**: 本記事は検証を単純化するため root で構築しています（ConoHa の公式手順も root 接続を案内しています）。長期運用では**バッチ専用ユーザーを作り、リポジトリ・`.env`・cron の所有権をそのユーザーに分離する**構成も検討してください — [#4](https://qiita.com/rex0220/items/d0a66c133edd42ff91c4) で Windows 側について書いた「専用アカウントで動かす」と同じ考え方です。
 
+## この VPS に載っているもの
+
+セットアップ後の状態を整理します。**自分で入れたのは 2 つだけ**です。
+
+| | パッケージ | バージョン | 用途 |
+| --- | --- | --- | --- |
+| **今回導入** | nodejs（NodeSource） | 22.23.2 | kSQL Flow の実行環境（要件は 20.6 以上） |
+| **今回導入** | gh（GitHub CLI） | 2.98.0 | private リポジトリの clone と git 認証 |
+| イメージ同梱 | git | 2.43.0 | ジョブの更新（Already up to date.） |
+| イメージ同梱 | cron | 3.0pl1 | 定期実行 |
+| イメージ同梱 | **fail2ban** | 1.0.2 | SSH 総当たりの遮断（**有効**・前述の BAN の犯人） |
+| イメージ同梱 | **ufw** | 0.36.2 | ファイアウォール（**有効**） |
+| イメージ同梱 | unattended-upgrades | 2.9.1 | 自動セキュリティ更新（**作成直後の apt ロックの原因**） |
+| イメージ同梱 | curl / wget / openssh-server | — | 取得・接続の基本ツール |
+
+npm 側の依存はリポジトリ内（）に閉じており、グローバルインストールはありません:
+
+
+
+**ディスクは 13MB**（リポジトリ + node_modules）、OS 全体でも 5.6GB/99GB。**メモリは OS 全体で 357〜379MB**（ の used）で、1GB プランに十分収まります。Docker も Web サーバーも要りません — **cron から node を叩くだけの構成**です。
+
 ## 起動スクリプトは Windows 版と同じ思想
 
 `run_batch.sh` を用意します。[#4 の run_batch.bat](https://qiita.com/rex0220/items/d0a66c133edd42ff91c4) と設計が一対一で対応しています:
