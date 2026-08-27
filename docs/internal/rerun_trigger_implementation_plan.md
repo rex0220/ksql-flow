@@ -191,11 +191,10 @@ CLAIMED --確保期限超過------------------------------> UNKNOWN + チェッ�
 
 profile と host は必ずローカル設定値を kintone クエリ用にエスケープして埋める。レコードから取得した値を実行対象の決定に使わない。
 
-候補クエリは概念上、次の条件だけとする。
+候補クエリは概念上、次の条件だけとする。**`record_type` もクエリで絞らない** — 一覧ではジョブ名の見える JOB 行のほうがクリックしやすく、JOB へのチェックをクエリで落とすと永遠に滞留してリマインダー（record_type を見ない）が誤発報する。取得してコードで判定し、`CANCELED` + 理由（BATCH 親レコードへの誘導）で返す（2026-08-27 運用初日に検出・修正）。
 
 ```text
-record_type in ("BATCH")
-and profile = "<ローカル profile>"
+profile = "<ローカル profile>"
 and host = "<ローカル host>"
 and rerun_request in ("REQUEST")
 order by started_at asc
@@ -302,6 +301,7 @@ GET の `fields` に `batch_id` と `git_ref` を含める。ポーラーは `gi
 | 期限切れ | `EXPIRED` | あり | `要求の有効期限を超過したため実行しませんでした。` |
 | 受付上限超過 | `CANCELED` | あり | `受付条件を満たさないため取り消しました。` |
 | 対象が失敗系でない | `CANCELED` | あり | `対象が失敗したバッチではないため取り消しました。失敗した実行の記録を選び直してください。` |
+| 対象が JOB レコード | `CANCELED` | あり | `対象がバッチレコードではないため取り消しました。レコード種別 BATCH（親レコード）にチェックしてください。` |
 
 Exit 1 は設定不備だけでなく、再開できる直近バッチが無い場合にも返るため、原因を断定しない。Exit 5 は失敗ではなく待機であり、チェック、`rerun_attempt`、初回の `rerun_requested_at` / `rerun_requested_by` を保持して `REQUESTED` へ戻す。signal や 0〜5 以外は成功・失敗を断定しない。
 
