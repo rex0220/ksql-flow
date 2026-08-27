@@ -241,7 +241,7 @@ exec node --env-file=.env node_modules/@rex0220/ksql-flow/dist/cli.js run-all ./
 - **`"$@"` で引数を素通し** — cron からは引数なしで、復旧時は `./run_batch.sh --resume` で呼べます（後述）
 - **自動再起動は設定しない**。復旧は [#7](https://qiita.com/rex0220/items/39821af2a79b88de0ed2) の `--resume` に一本化
 
-clone した直後は**実行権限が落ちていることがある**ので、`chmod +x run_batch.sh` を一度実行しておきます（cron から呼ぶと `Permission denied` で気づきます）。
+実行ビットは Git が管理するので、**テンプレート側で記録済みなら clone しただけで実行できます**。自分で足したスクリプトが `Permission denied` になるなら、`chmod +x` でその場をしのぐより `git update-index --chmod=+x run_batch.sh` でコミットしてしまうほうが、この記事の「**手順書ではなくコードに残す**」方針に合います。
 
 別ディレクトリから実行して、正しく動くことを確認します:
 
