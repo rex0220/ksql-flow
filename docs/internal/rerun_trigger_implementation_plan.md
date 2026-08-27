@@ -2,7 +2,7 @@
 
 * 作成: 2026-08-27（Codex）／**Q12 改訂: 2026-08-27**（`rerun_trigger_design.md` v7・Q12 のチェックボックス分離を反映）
 * 対象: kSQL Flow v0.4.0 を利用する VPS / オンプレのジョブリポジトリ
-* 状態: **実装着手可**（レビュー: `reviews/poll_control_plan_review2_claudecode-20260827.md` の指摘 4 件を反映済み）
+* 状態: **第 1 段階完了（実機ドリル 13/14 合格・2026-08-27）** — 記録は `poll_control_drill_record-20260827.md`。残: ドリル 14 の実発報観測
 * 正: `rerun_trigger_design.md` **v7 のみ**。`reviews/decisions.md` Q8・Q9・Q10・Q11（追補 1〜3 を含む）・Q12 はすべて裁定済みであり、本計画では再提案しない
 * 関連: `ksql_flow_spec.md` §5.5・§6・§8・§10.3、`reviews/poll_control_plan_review_claudecode-20260827.md`
 
