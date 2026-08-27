@@ -114,9 +114,17 @@ chmod 600 ~/.ssh/authorized_keys
 
 調べると、**今回使った ConoHa の Ubuntu 24.04 イメージには fail2ban が最初から入っていて、sshd の jail が有効**でした（私はインストールしていません — パッケージの導入日がイメージのビルド時期になっており、稼働も確認済みです。ufw も有効でした）。
 
-**fail2ban の「jail（ジェイル）」**は、この監視 1 つ分の設定単位です。「**どのログを見て・どんな失敗を数え・何回で・どれだけ遮断するか**」をひとまとめにしたもので、SSH 用の `sshd` jail が既定で有効になっています（Ubuntu の既定は概ね「10 分以内に 5 回失敗したら 10 分間その IP を遮断」。遮断は iptables などのファイアウォールに一時ルールを足す形で行われます）。今回の私は、この条件を軽々と超えました。
+**fail2ban の「jail（ジェイル）」**は、この監視 1 つ分の設定単位です。「**どのログを見て・どんな失敗を数え・何回で・どれだけ遮断するか**」をひとまとめにしたもので、SSH 用の `sshd` jail が有効になっていました。**今回の環境での実測値**がこちらです（遮断は iptables などのファイアウォールに一時ルールを足す形で行われます）:
 
-状態は 1 コマンドで見えます:
+```bash
+fail2ban-client get sshd findtime    #   600   … 600 秒 = 10 分の間に
+fail2ban-client get sshd maxretry    #   5     … 5 回失敗したら
+fail2ban-client get sshd bantime     #   86400 … 86400 秒 = 24 時間 遮断する
+```
+
+**24 時間**です。私はユーザー名を 14 通り試したので、この条件を軽々と超えました。値はイメージやディストリビューションによって異なるので、**自分の環境の値を上のコマンドで確認しておく**ことをおすすめします。
+
+現在の状態も 1 コマンドで見えます:
 
 ```bash
 fail2ban-client status sshd
@@ -407,11 +415,13 @@ dpkg -l 'linux-image-*'       # ディスク上のカーネル
 **方針 A: 自動再起動（バッチの実行時刻を避けて）**
 
 ```bash
-# /etc/apt/apt.conf.d/50unattended-upgrades
+# /etc/apt/apt.conf.d/60ksql-unattended-upgrades （新規作成）
 Unattended-Upgrade::Automatic-Reboot "true";
 Unattended-Upgrade::Automatic-Reboot-WithUsers "true";
 Unattended-Upgrade::Automatic-Reboot-Time "04:00";   # バッチ 6:07 の 2 時間前
 ```
+
+**既定の `50unattended-upgrades` を直接編集せず、番号の大きい別ファイルを作る**のがポイントです（後から読まれた設定が優先されます）。パッケージ更新で既定ファイルが置き換わっても自分の設定が生き残り、「何を変えたのか」も 1 ファイル見れば分かります — 本記事で繰り返している「**手順書が腐る**」への対策でもあります。
 
 バッチの時刻から十分離せば、実行中に落とされる心配はありません。そして**累積・全量型など「翌日の実行が欠落を吸収できる」ジョブなら、最悪 1 回スキップされても翌朝収束します**（[#7](https://qiita.com/rex0220/items/39821af2a79b88de0ed2) の as-of 固定と冪等リラン・[#8](https://qiita.com/rex0220/items/30cac8d8b52ec8ac782a) のクラス D と同じ構造。期間窓型のジョブなら欠落した日をバックフィルする必要があります）。手離れを優先するならこれが最適解です。
 
