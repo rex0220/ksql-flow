@@ -145,6 +145,7 @@
 | 8 | ⑤-b 深掘り: 失敗の 4 クラスと AI 診断（#8） | **公開済み 2026-08-27**: https://qiita.com/rex0220/items/30cac8d8b52ec8ac782a（A〜D 分類・AI トリアージ実演・診る AI/押す人間/拾う機械。ChatGPT 9.9 / Gemini 公開可） |
 | 9 | ④'' VPS + cron（#9） | **公開済み 2026-08-27**: https://qiita.com/rex0220/items/dd8ec668b8966e346d48（ConoHa VPS 実機構築を Claude が全実施・cron 遅延 +1 秒の実測・罠 5 つ・保守工数/パッチ/再起動の設計・AI と人間の境界。ChatGPT 9.9 / Gemini 公開可。cron/Docker 単独編は廃し、Docker は GCP 編へ吸収） |
 | - | ④'' 共有レンタルサーバー編 | **見送り** — さくら等は FreeBSD で Node 公式バイナリ無し・Docker 不可・国外 IP フィルターで GitHub 遮断。#9 内で 1 段落触れるに留める |
+| 10 | リラン指示ポーラー編（#10） | **ドラフト完成（2026-08-28）** — kintone のチェック 1 つで VPS のリランを起動。ポート 0 開放・チェックボックス分離(ACL は選択肢を制限できない)・リマインダー停止検知・実機罠 3 つ(DATETIME 分切り捨て/トークン Administrator/JOB 行クリック)・実測 4 分。`qiita_draft_10_rerun_control.md`。コードは template v1.0.0 / ksql-flow v0.4.1 公開済み |
 | 11 | ④'-b GCP 編 | examples の Cloud Run Jobs 例を追加してから。共通設計論もこの記事が持つ |
 | - | ④'-a AWS 編 / ④'-c Azure 編 | **見送り（2026-08-24）** — AWS はアカウント利用不能で実機検証不可・Azure は絞り込みで温存 |
 | 10 | ⑤ 設計深掘り | ネタ在庫として温存・反応を見て |
