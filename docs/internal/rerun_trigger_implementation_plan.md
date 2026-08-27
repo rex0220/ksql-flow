@@ -1,39 +1,40 @@
-# kintone 実行指示ポーラー実装計画
+# kintone リラン指示ポーラー実装計画
 
-* 作成: 2026-08-27（Codex）／**改訂: 2026-08-27**（Claude Code レビュー指摘を反映）
+* 作成: 2026-08-27（Codex）／**全面改訂: 2026-08-27**（`rerun_trigger_design.md` v6・Q11 追補 1〜3 を反映）
 * 対象: kSQL Flow v0.4.0 を利用する VPS / オンプレのジョブリポジトリ
-* 状態: **実装着手可**（レビュー: `reviews/poll_control_plan_review_claudecode-20260827.md`）
-* 正: `rerun_trigger_design.md` v4。Q8・Q9・Q10 は裁定済みであり、本計画では再提案しない
-* 関連: `ksql_flow_spec.md` §5.5・§6・§8・§10.3、`qiita_draft_09_vps_cron.md`
+* 状態: **実装着手可**（レビュー: `reviews/poll_control_plan_review2_claudecode-20260827.md` の指摘 4 件を反映済み）
+* 正: `rerun_trigger_design.md` **v6 のみ**。`reviews/decisions.md` Q8・Q9・Q10・Q11（追補 1〜3 を含む）はすべて裁定済みであり、本計画では再提案しない
+* 関連: `ksql_flow_spec.md` §5.5・§6・§8・§10.3、`reviews/poll_control_plan_review_claudecode-20260827.md`
 
 ---
 
 ## 1. 目的と固定条件
 
-kintone の実行指示アプリを VPS から定期ポーリングし、受け付けた指示に対して、SSH で行う場合と同じ固定コマンド `./run_batch.sh --resume` を起動する。変えるのは起動手段だけであり、リラン対象の選抜、元バッチの as-of 引き継ぎ、分散ロック、ログ記録は公開済みの kSQL Flow v0.4.0 に委ねる。
+既存の kintone 実行ログアプリを VPS から定期ポーリングし、失敗した BATCH レコードの `rerun_state` が `REQUESTED` に変更されたとき、SSH で行う場合と同じ固定コマンド `./run_batch.sh --resume` を起動する。専用の実行指示アプリは作らない。要求、確保、実行結果は元の失敗 BATCH レコードの `rerun_` フィールドへ記録する。
+
+変えるのは起動手段だけである。リラン対象の選抜、元バッチの as-of 引き継ぎ、分散ロック、JOB / BATCH ログ記録は公開済みの kSQL Flow v0.4.0 に委ねる。
 
 MVP の固定条件は次のとおりとする。
 
-* 操作は `リラン` のみとし、通常実行とバックフィルは受け付けない
-* 単一ホスト構成、at-least-once、ホスト単位の `flock`、指示の有効期限を採用する
-* kSQL Flow v0.4.0 と `../kintone-sql-tools` は変更しない
+* 操作はリランだけとし、通常実行とバックフィルは受け付けない
+* 単一ホスト構成、at-least-once、ホスト単位の `flock`、要求の有効期限を採用する
+* kSQL Flow 本体と `../kintone-sql-tools` は変更しない
 * 対象バッチ固定、`git_ref` 一致による停止、新しい resume 選抜規則は導入しない
+* API トークンは既存ログアプリ用の環境変数を再利用し、新しいトークンを増やさない
 * 実ドメインとトークンはコミットしない。例示は `https://example.cybozu.com` と環境変数名だけにする
-* 実 kintone での書込試験は、指示の識別名と業務アプリのテストキーを `KSQL_FLOW_TEST_` で始める
+* 実 kintone での検証データは、識別可能な値をすべて `KSQL_FLOW_TEST_` で始める
 
 ## 2. 成果物の配置
 
-### 2.1 判断
+### 2.1 第 1 段階の配置
 
-第1段階の実装成果物は kSQL Flow 本体ではなく、利用者のジョブリポジトリ `my-ksql-jobs` に置く。再利用用の見本は別リポジトリ `ksql-flow-template` に反映する。
-
-想定配置は次のとおり。
+第 1 段階の成果物は kSQL Flow 本体ではなく、利用者のジョブリポジトリ `my-ksql-jobs` に置く。実績確認後に再利用用の `ksql-flow-template` へ反映する。
 
 ```text
 my-ksql-jobs/
 ├── .env                              # 既存。秘密値、chmod 600、Git 管理外
 ├── jobs/
-├── ksql.config.json                  # 既存。ランナー専用
+├── ksql.config.json                  # 既存。変更しない
 ├── poll-control.config.json          # 新規。ポーラー専用、秘密値なし
 ├── run_batch.sh                      # 既存。変更しない
 ├── scripts/
@@ -43,446 +44,483 @@ my-ksql-jobs/
     └── poll_control.test.mjs         # node:test によるローカル試験
 ```
 
-理由は次のとおり。
+この配置にする理由は次のとおりである。
 
-* `run_batch.sh` の絶対パス、ホスト名、profile の種類、cron 時刻、指示アプリ ID は配備先固有であり、ジョブと同じ変更管理単位に置くのが自然である
-* 第1段階の目的は v0.4.0 を一切変えずに実績を取ることである。kSQL Flow 本体へ入れると、新しい CLI 契約、設定スキーマ、配布物、互換性保証が発生する
-* `run_batch.sh --resume` をそのまま呼ぶため、起動手段だけを変えるという v4 §2 と Q10 を構造的に守れる
-* ポーラーとジョブ設定を同じ PR でレビューでき、allowlist と実際の配備先がずれにくい
+* `run_batch.sh` の絶対パス、ホスト名、profile、cron、ログアプリ ID は配備先固有であり、ジョブと同じ変更管理単位に置くのが自然である
+* kSQL Flow 本体へ入れると CLI 契約、公開 JSON Schema、配布物、互換性保証が新たに発生する
+* `run_batch.sh --resume` をそのまま呼ぶことで、Q10 の「手動リランと同一動作」を構造的に守れる
+* allowlist と実際の配備先を同じ PR でレビューできる
 
-### 2.2 テンプレート同梱の影響
+### 2.2 第 2 段階への移管
 
-第1段階の実績確認後、`ksql-flow-template` には上記スクリプト、秘密値を含まない設定例、cron 例、セットアップ手順を同梱できる。利用者は clone 後にホスト固有値とアプリ ID を埋めるだけになる一方、次の保守責任が増える。
+第 1 段階の運用実績を確認後、スクリプト、秘密値を含まない設定例、cron 例、ログアプリへの 9 フィールド追加手順を `ksql-flow-template` へ移す。kSQL Flow npm パッケージへの公式サブコマンド化、テンプレート ZIP への 9 フィールド反映、公開 Schema の追加は第 2 段階で別途扱う。
 
-* Ubuntu 以外を含む `/usr/bin/flock`・Node のパス差異を説明する必要がある
-* テンプレートの `run_batch.sh` とポーラーの固定 argv の整合を契約テストで確認する必要がある
-* kintone 実行指示アプリのフィールド、選択肢、アクセス権、一覧をテンプレート版数として管理する必要がある
-* `poll-control.config.json` の互換性と移行手順が利用者向け契約になる
+## 3. 実装言語と実行方式
 
-kSQL Flow npm パッケージの `template/` に実行指示アプリ ZIP まで同梱するのは第2段階へ回す。実施時は `package.json` の `files`、テンプレート README、ZIP の契約テスト、リリースノート、配布物の秘密情報検査が追加で必要になる。
+REST API と状態遷移の本体は、依存パッケージを追加しない ESM の Node 22 スクリプトとする。VPS に Node 22 はあるが `jq` は保証されないため、shell + `curl` + `jq` は採用しない。
 
-## 3. 実装言語
+Node 本体は標準 `fetch`、`AbortSignal.timeout`、`child_process.spawn`、`URL`、JSON API だけを使う。子プロセスは固定 command と固定 args を `spawn(command, args, { cwd, shell: false })` で起動する。`sh -c`、文字列 command、レコード値の文字列補間は禁止する。
 
-### 3.1 採用: Node 22 + 薄い shell ランチャー
+`flock` は Node 標準 APIにないため、`poll_control.sh` が固定絶対パスのロックファイルを使って `/usr/bin/flock -n` を取得し、固定絶対パスの Node 本体を `exec` する。取得失敗は「別ポーラーが動作中」の正常スキップとして、kintone API を呼ばず Exit 0 とする。Node から `curl`、`git`、別 shell は起動しない。
 
-REST API と状態遷移の本体は、依存パッケージを追加しない ESM の Node スクリプトとする。shell は `flock` を取得して Node を `exec` する部分だけに限定する。
+## 4. 実行ログアプリの拡張
 
-採用理由:
+### 4.1 追加する 9 フィールド
 
-* VPS には Node 22 が確実にあるが、`jq` がある保証はない。shell + `curl` + `jq` を採ると jq の導入・版数・障害時の切り分けが新しい運用要件になる
-* Node 22 の標準 `fetch`、`AbortSignal.timeout`、`child_process.spawn`、`URL`、JSON API だけで実装でき、npm 依存を増やさずに済む
-* kintone 応答の型・必須フィールド・列挙値・revision を明示的に検証しやすい
-* `spawn(command, args, { shell: false })` により、文字列連結や `sh -c` を使わない argv 配列起動を直接保証できる
-* HTTP エラー本文とトークンを分離し、固定要約だけを書き戻す経路をテストしやすい
+仕様 §8.2 および `src/logapp.ts` の既存 23 フィールドは変更しない。既存の実行ログアプリへ次の 9 フィールドを追加し、合計 32 フィールドとする。フィールドコードは小文字スネークケース、ラベルは日本語とし、BATCH レコードでだけ使用する。JOB レコードでは未選択または空欄のままとする。
 
-`flock` は Node 標準 API に無いため、`scripts/poll_control.sh` が絶対パスのロックファイルを使って `/usr/bin/flock -n` を実行する。ロック取得失敗は「別ポーラーが動作中」の正常スキップとして、kintone API を呼ばず Exit 0 とする。API 処理を shell へ戻したり、Node から `curl` を起動したりはしない。
+| フィールドコード | ラベル | kintone 型 | 必須・既定 | 用途 |
+| --- | --- | --- | --- | --- |
+| `rerun_state` | リラン状態 | ドロップダウン | 必須にしない・**既定は未選択** | 人間が編集する唯一のフィールド。選択肢は §4.2 |
+| `rerun_requested_at` | リラン要求日時 | 日時 | 任意・空欄 | 初回確保時に人間の要求時刻を退避。有効期限の唯一の基準 |
+| `rerun_requested_by` | リラン要求者 | 文字列（1行） | 任意・空欄 | 初回確保時に `更新者` を退避する恒久的な証跡 |
+| `rerun_claimed_host` | リラン確保ホスト | 文字列（1行） | 任意・空欄 | claim したローカルホスト |
+| `rerun_claim_expires_at` | リラン確保期限 | 日時 | 任意・空欄 | stale 回収の判定時刻 |
+| `rerun_attempt` | リラン試行回数 | 数値 | 任意・初期値 0、整数、最小 0 | claim 成功回数。Exit 5 後も保持 |
+| `rerun_exit_code` | リラン終了コード | 数値 | 任意・空欄、整数 | kSQL Flow の Exit Code |
+| `rerun_result` | リラン結果 | 文字列（複数行） | 任意・空欄 | allowlist から選ぶ固定要約だけを格納 |
+| `rerun_batch_id` | リラン実行バッチID | 文字列（1行） | 任意・空欄 | resume が新しく作った BATCH の `batch_id`。確定規則は §6.6 |
 
-## 4. kintone 実行指示アプリ
+`rerun_state` に「空」という選択肢は作らない。通常の BATCH / JOB レコードにおける値なしは、kintone クエリでは `rerun_state in ("")` と表現する。
 
-### 4.1 フィールド定義
+詳細画面では 9 フィールドを折りたたみグループへまとめる。一覧には失敗 BATCH の `status`、`profile`、`host`、`started_at`、`rerun_state`、`rerun_requested_at`、`rerun_requested_by`、`rerun_result`、`rerun_batch_id` を表示し、元の失敗とリラン結果を同一レコードで確認できるようにする。
 
-表示名とフィールドコードを分離し、プログラムはフィールドコードだけを使用する。`対象プロファイル` と `対象ホスト` の選択肢は配備ごとに allowlist と一致させる。表中の `prod` / `stg` / `vps-batch-01` は例であり、実ドメインや秘密値ではない。
+### 4.2 `rerun_state` の選択肢と状態機械
 
-| 表示名 | フィールドコード | kintone 型 | 必須 | 初期値・選択肢 | 用途 |
-| --- | --- | --- | --- | --- | --- |
-| 指示識別名 | `request_key` | 文字列（1行） | 必須 | なし | 人間向け識別。実機試験は `KSQL_FLOW_TEST_...` |
-| 操作 | `operation` | ドロップダウン | 必須 | `リラン` のみ、初期値 `リラン` | allowlist キー。自由入力不可 |
-| 対象プロファイル | `target_profile` | ドロップダウン | 必須 | 例: `prod` / `stg` | ローカル profile allowlist のキー |
-| 対象ホスト | `target_host` | ドロップダウン | 必須 | 例: `vps-batch-01` | 拾う単一ホストの allowlist キー |
-| 状態 | `state` | ドロップダウン | 必須 | `受付待ち` / `実行中` / `完了` / `失敗` / `結果不明` / `期限切れ` / `取消`、初期値 `受付待ち` | ポーラーが管理する状態 |
-| 確保ホスト | `claimed_host` | 文字列（1行） | 任意 | 空 | claim したローカルホストキー |
-| 確保期限 | `claim_expires_at` | 日時 | 任意 | 空 | stale 判定時刻 |
-| 試行回数 | `attempt_count` | 数値 | 必須 | `0`、最小 0、整数 | claim 成功回数。Exit 5 でも保持して再受付 |
-| 実行開始日時 | `execution_started_at` | 日時 | 任意 | 空 | claim 成功時刻 |
-| 実行終了日時 | `execution_finished_at` | 日時 | 任意 | 空 | 子プロセス終了確認時刻 |
-| 実行バッチ ID | `execution_batch_id` | 文字列（1行） | 任意 | 空 | ログアプリの BATCH レコードとの照合 |
-| 終了コード | `exit_code` | 数値 | 任意 | 空、整数 | kSQL Flow の Exit Code |
-| 結果要約 | `result_summary` | 文字列（複数行） | 任意 | 空 | allowlist から選ぶ固定文言だけを格納 |
-| 実行ログ URL | `log_url` | リンク | 任意 | Web サイトリンク、空 | ログアプリの検索画面への固定生成リンク |
-| 実行時 git_ref | `executed_git_ref` | 文字列（1行） | 任意 | 空 | **ログアプリの BATCH から転記**。記録だけに使い、実行可否には使わない |
+選択肢は既存 `status` / `record_type` と同じ大文字 ASCII 識別子とする。
 
-`$id`、`$revision`、`作成者`、`作成日時`、`更新者`、`更新日時` は kintone のシステムフィールドを利用する。独自の依頼者フィールドは作らない。`$revision` は claim と結果更新の楽観ロックに、`作成日時` は FIFO と有効期限に使う。
+| 値 | 意味 | 設定主体 |
+| --- | --- | --- |
+| （未選択） | リラン要求なし | 既定 |
+| `REQUESTED` | リランを要求した | 人間 |
+| `CLAIMED` | ポーラーが確保し、実行中 | ポーラー |
+| `SUCCESS` | Exit 0 で正常終了 | ポーラー |
+| `FAILED` | Exit 1 / 2 / 3 / 4 で終了 | ポーラー |
+| `UNKNOWN` | 結果を断定できない、または stale | ポーラー |
+| `EXPIRED` | 有効期限超過のため未実行 | ポーラー |
+| `CANCELED` | 受付条件を満たさず取消 | ポーラー / 運用管理者 |
 
-`request_key` は実行引数には使わない。重複禁止にもせず、監査と試験データ識別だけに使う。
+```text
+（未選択） --人間が失敗 BATCH を要求--------------> REQUESTED
+REQUESTED  --有効期限超過--------------------------> EXPIRED
+REQUESTED  --revision 条件付き claim---------------> CLAIMED
+REQUESTED  --受付上限超過など-----------------------> CANCELED
+CLAIMED    --Exit 0---------------------------------> SUCCESS
+CLAIMED    --Exit 1 / 2 / 3 / 4---------------------> FAILED
+CLAIMED    --Exit 5---------------------------------> REQUESTED
+CLAIMED    --signal / 未知 Exit---------------------> UNKNOWN
+CLAIMED    --確保期限超過を次回ポーラーが回収------> UNKNOWN
+```
 
-### 4.2 アクセス権の設定手順
+`SUCCESS` / `FAILED` は既存 `status` と意味も一致するため再利用する。実行中は `status = RUNNING` との混同を避け、`rerun_claimed_host` / `rerun_claim_expires_at` と揃えて `CLAIMED` とする。stale は `UNKNOWN` へ更新するだけで、自動再実行しない。
 
-1. アプリ管理者が上記フィールドを作り、`state` の初期値を `受付待ち`、`operation` の初期値を `リラン` にする。
-2. アプリのアクセス権で、リラン依頼者グループには「レコード閲覧・追加」だけを与え、編集・削除・アプリ管理は与えない。これがリラン実行権限になる。グループの選定は運用判断とする。
-3. 通知受信だけのグループにはレコード閲覧だけを与える。
-4. 運用管理者には閲覧・追加・編集・削除を与え、誤登録を `取消` にできるようにする。
-5. フィールドのアクセス権で、依頼者が入力できるのは `request_key`、`operation`、`target_profile`、`target_host` だけとする。`state` 以下の結果・claim フィールドは閲覧のみとし、編集可能者を運用管理者に限定する。
-6. ポーラー用 API トークンを発行し、権限は「レコード閲覧・編集」だけにする。追加・削除は与えない。トークン値は VPS の `.env` に `KSQL_CONTROL_TOKEN` として保存し `chmod 600`、Git 管理外とする。
-7. kSQL Flow の既存ログアプリ用トークンは、ランナーの resume とポーラーの実行バッチ照合に必要な閲覧、ランナーに必要な追加・編集だけを持たせる。実行指示アプリ用トークンとは分ける。
-8. 設定を運用環境へ反映後、依頼者アカウントで「追加できるが結果フィールドを変更できない」、通知受信者で「閲覧だけ」、API トークンで「取得と更新はできるが追加できない」を確認する。
-9. `受付待ち` がポーリング間隔の 2〜3 倍を超えて残った場合の kintone 条件通知を設定し、ポーラー停止を人間へ知らせる。
+### 4.3 フィールド追加と契約検査
 
-指示アプリとログアプリは統合しない。人間追加・VPS 編集という指示側の権限と、VPS 追加・編集・人間閲覧というログ側の権限が逆であり、API 枠、通知、状態機械も分離したほうが事故範囲を小さくできるためである。
+アプリ管理者が kintone のアプリ設定で 9 フィールドを追加してデプロイする。`rerun_state` は必須にせず、上記 7 選択肢だけを設定する。既存レコードへ初期値を一括投入しない。
+
+既存の `init-logapp` は `LOG_APP_FIELDS` の 23 フィールドしか作らず、既存の `--check-logapp` は余分なフィールドを拒否しない代わりに `rerun_*` の不足も検出しない。ランナーは変更しないため、ポーラーが自前の `check` を持つ。
+
+自前 check はポーラーの導入時および cron 有効化前の必須 preflight とし、`GET /k/v1/app/form/fields.json` で次を検査する。
+
+* 9 フィールドがすべて存在する
+* 型が §4.1 と一致する
+* `rerun_state` の選択肢集合が §4.2 と完全一致する
+* `rerun_state` が必須でなく、既定値が未選択である
+* `rerun_attempt` が数値である
+
+不一致時は候補取得と子プロセス起動を行わず fail-closed で停止する。通常ポーリングの固定費 288 回/日とは別に、導入・設定変更時の preflight API が発生する。cron の各回でフィールド定義 GET を重ねて固定費を 2 倍にしない。通常候補 GET で未知フィールドエラーが返った場合も fail-closed とし、運用者へ自前 check の再実行を促す。
+
+### 4.4 アクセス権の設定手順
+
+専用アプリは作らず、既存ログアプリのアクセス権を次の順で設定する。
+
+1. アプリ管理者が §4.1 の 9 フィールドと一覧を追加し、アプリ設定をデプロイする。
+2. リラン依頼者グループにはアプリのレコード閲覧権限を与える。既存ログレコードの追加・削除権限は与えない。
+3. フィールド単位アクセス権で、リラン依頼者は `rerun_state` だけ編集可とし、既存 23 フィールドおよび他の 8 個の `rerun_*` は閲覧のみとする。これにより、実ユーザーについては「`rerun_state` を編集できる人 = リランを起こせる人」となる。
+4. 通知受信だけの実ユーザーには閲覧のみを与える。
+5. 運用管理者には必要な閲覧・編集権限を与え、誤要求を `CANCELED` にできるようにする。
+6. VPS では既存ログアプリ用 API トークンの環境変数を再利用する。API トークンにはレコード閲覧・編集、およびランナーが必要とする追加権限が必要である。値は `.env` に保存して `chmod 600`、Git 管理外とする。
+7. 実ユーザー、通知受信者、運用管理者、API トークンの各主体で許可・拒否を実測する。
+8. `rerun_state = REQUESTED` がポーリング間隔の 2〜3 倍を超えて残った場合の条件通知を追加し、ポーラー停止を人間へ知らせる。
+
+**API トークンは Administrator 相当で動作し、フィールド単位アクセス権の対象外である。** したがってトークンを `rerun_*` だけに制限することはできない。一方、フィールド単位アクセス権は実ユーザーには効くため、要求者の制御は維持できる。この非対称性を権限試験で明示的に確認する。
+
+トークン操作後の `更新者` は Administrator になる。そのため初回 claim で、ポーラーがまだ対象レコードを一度も更新していない時点の `更新日時` と `更新者` を、それぞれ `rerun_requested_at` と `rerun_requested_by` に退避する。以後この 2 フィールドは書き換えない。
 
 ## 5. 設定
 
 ### 5.1 保存先
 
-ポーラー設定はトップレベルの `poll-control.config.json` に分離する。既存 `ksql.config.json` は kSQL Flow の公開 JSON Schema が未知キーを拒否するため、ポーラー設定を追加すると v0.4.0 の起動を壊す。ランナーを変更しない条件からも別ファイルが必要である。
+ポーラー設定はトップレベルの `poll-control.config.json` に分離する。既存 `schema/ksql.config.schema.json` はトップレベルも profile も `additionalProperties: false` で未知キーを拒否するため、`ksql.config.json` に追加すると v0.4.0 の起動を壊す。ランナーを変更しない条件からも別ファイルが必要である。
 
-秘密値は両 JSON に直接書かず、環境変数名だけを保持する。`.env` は既存 `run_batch.sh` と共用する。
+秘密値は JSON に直接書かず、既存 `.env` の環境変数名だけを保持する。
 
 ### 5.2 設定項目
 
-| 設定 | 置き場所 | 例 / 既定 | 理由 |
-| --- | --- | --- | --- |
-| kintone ベース URL | `poll-control.config.json` | `https://example.cybozu.com` | API URL とログリンクの固定基点 |
-| ゲストスペース ID | 同上 | `null` | URL 形式を固定分岐するため。MVP で不要なら null |
-| 実行指示アプリ ID | 同上 | 数値例のみ | 配備先固有。論理名解決をポーラーへ持ち込まない |
-| 指示アプリ token 環境変数名 | 同上 | `KSQL_CONTROL_TOKEN` | 値を JSON に書かない |
-| ログアプリ ID | 同上 | 数値例のみ | 実行バッチ ID 照合とリンク生成用 |
-| ログ token 環境変数名 | 同上 | `KSQL_TOKEN_LOGS` | 既存ランナー用秘密値を再利用し、値は書かない |
-| 自ホストキー | 同上 | `vps-batch-01` | kintone ドロップダウンおよび `os.hostname()` との一致を起動前検証 |
-| profile allowlist | 同上 | `prod` / `stg` をキーとする map | レコード値をパスへ変換しないため |
-| profile ごとの command / args / cwd | 同上 | すべて絶対パス、args は `['--resume']` 固定 | allowlist の値はローカル設定だけに置く |
-| 指示有効期限 | 同上 | 21,600 秒（6時間） | v4 §4.5 の受付期限。**ポーリング空白時間より長いこと**（§9.1） |
-| ポーリング空白時間の申告 | 同上 | 既定 300 秒（終日 5 分間隔） | 有効期限との整合を起動時に検証するための宣言値 |
-| claim 期限 | 同上 | `batchTimeoutSec + 600秒` | ランナー上限より先に stale 扱いしない |
-| profile ごとの受付待ち上限 | 同上 | 3件 | 連投時の実行回数を抑える |
-| 1回の overflow 取消上限 | 同上 | 3件 | 攻撃時にも更新 API 数を有限にする |
-| 1回の stale 回収上限 | 同上 | 3件 | 1ポーリングの API 消費を有限にする |
-| HTTP タイムアウト | 同上 | 30秒 | ポーラーのハングを避ける |
-| ポーリング間隔 | crontab | 5分 | cron が発火源なので二重設定にしない |
-| flock ファイル | `poll_control.sh` のローカル定数 | `/run/lock/ksql-poll-control.lock` | kintone 値から組み立てない |
+| 設定 | 例 / 既定 | 用途 |
+| --- | --- | --- |
+| kintone ベース URL | `https://example.cybozu.com` | API URL の固定基点。HTTPS 必須 |
+| ゲストスペース ID | `null` | API パスの固定分岐 |
+| ログアプリ ID | 数値 | 候補取得、claim、結果更新、BATCH 照合に共用 |
+| ログアプリ token 環境変数名 | `KSQL_TOKEN_LOGS` | 既存ランナー用秘密値を再利用 |
+| ローカル profile | `prod` | クエリ条件。レコード値から決めない |
+| ローカル host | `vps-batch-01` | クエリ条件。ランナーが記録する `os.hostname()` と一致させる |
+| command / args / cwd | すべて絶対パス、args は `--resume` 固定 | argv 配列起動用のローカル allowlist |
+| 要求有効期限 | 21,600 秒（6 時間） | `rerun_requested_at` からの受付期限 |
+| ポーリング空白時間の申告 | 300 秒 | cron 既定との整合検証 |
+| claim 期限 | `batchTimeoutSec + 600秒` | ランナー上限より先に stale としない |
+| profile ごとの `REQUESTED` 上限 | 3 件 | 連投 DoS の抑制 |
+| 1 回の overflow 取消上限 | 3 件 | 更新 API 数の上限 |
+| 1 回の stale 回収上限 | 3 件 | 更新 API 数の上限 |
+| 候補取得上限 | 上記を処理できる有限件数 | 巨大応答と無制限処理の防止 |
+| HTTP タイムアウト | 30 秒 | ハング防止 |
+| ポーリング間隔 | crontab で 5 分 | 二重設定を避ける |
+| flock ファイル | `/run/lock/ksql-poll-control.lock` | kintone 値から組み立てない |
 
-profile map の各値は、たとえば command が `/opt/ksql/my-ksql-jobs/run_batch.sh`、args が `--resume`、cwd が `/opt/ksql/my-ksql-jobs` という完全な固定値を持つ。`target_profile = prod` は map のキー検索にだけ使い、`/opt/.../${target_profile}` のような補間は禁止する。自ホストキーは kSQL Flow v0.4.0 がログアプリの `host` に記録する `os.hostname()` と完全一致させ、指示と BATCH レコードを同じ値で照合する。
+第 1 段階は単一 host / profile を対象とする。将来 map 化しても、レコード値は allowlist のキー検索にだけ使い、パス、環境変数名、cwd の組み立てには使わない。
 
-起動時に設定全体を検証し、不明キー、相対パス、`--resume` 以外の argv、重複 profile、非 HTTPS URL、範囲外の上限、未定義の環境変数があれば API 呼び出し前に停止する。**指示有効期限がポーリング空白時間以下の場合も停止する** — この組み合わせは「拾う前に必ず期限切れになる」設定であり、§9.1 の事故を構成上防ぐ。`claim` 期限は、対応する `ksql.config.json` の `limits.batchTimeoutSec` 変更時に同じ PR で見直す。第1段階ではランナー設定の内部構造へ依存して自動読込しない。
+起動前に未知キー、相対パス、`--resume` 以外の argv、非 HTTPS URL、範囲外上限、未定義の環境変数を拒否する。要求有効期限がポーリング空白時間以下なら API 呼び出し前に停止する。claim 期限は対応する `ksql.config.json` の `limits.batchTimeoutSec` 変更時に同じ PR で見直す。
 
 ## 6. ポーラーの処理フロー
 
-### 6.1 状態遷移
+### 6.1 クエリ
+
+profile と host は必ずローカル設定値を kintone クエリ用にエスケープして埋める。レコードから取得した値を実行対象の決定に使わない。
+
+通常要求の候補クエリは概念上、次の条件とする。
 
 ```text
-受付待ち --期限切れ------------------------------> 期限切れ
-受付待ち --revision 付き claim-------------------> 実行中
-受付待ち --profile ごとの受付上限超過------------> 取消
-実行中   --Exit 0--------------------------------> 完了
-実行中   --Exit 1 / 2 / 3 / 4--------------------> 失敗
-実行中   --Exit 5--------------------------------> 受付待ち
-実行中   --未知 Exit / signal / 結果更新不能------> 結果不明相当
-実行中   --確保期限超過を次回ポーラーが検知------> 結果不明
+record_type in ("BATCH")
+and profile = "<ローカル profile>"
+and host = "<ローカル host>"
+and rerun_state in ("REQUESTED")
+order by started_at asc
+limit <有限件数>
 ```
 
-「結果更新不能」の場合は kintone 自体へ状態を書けないため、実レコードは一時的に `実行中` のまま残る。次回到達時の stale 回収で `結果不明` に収束させる。自動で `受付待ち` に戻して再実行はしない。
+`started_at asc` により、同一 profile / host の古い BATCH から FIFO で処理する。JOB、別 profile、別 host は候補にしない。
 
-Exit 4 は部分成功であり、人間の確認が必要なので指示状態は `失敗` とする。Exit 1 も `失敗` とするが、**文言で原因を断定しない**。`--resume` は設定・検証エラーだけでなく「再開できる直近バッチの実行記録が見つからない」場合にも Exit 1 を返す（`runAll.ts` の `--resume に必要な直近バッチの実行記録が見つかりません`）ためで、「VPS の設定を確認せよ」と書くと依頼者を誤った方向へ誘導する。v4 で定めた主要経路 0 / 2 / 3 / 5 の意味は変更しない。signal 終了や 0〜5 以外は成功・失敗を断定せず `結果不明` とする。
+**`status` の判定はクエリではなくコードで行う。** 失敗系（`FAILED` / `ABORTED` / `TIMEOUT`）でないレコードに `REQUESTED` が付いていた場合、**revision 条件付きで `CANCELED` にして理由を返す**（固定文言は §6.7）。
 
-書き戻す要約は次の固定辞書とし、子プロセスや API の出力を連結しない。
+クエリ側で `status` を絞ると、成功済み BATCH に人間が誤って `REQUESTED` を付けたレコードを**ポーラーが永久に取得しない**。その結果、§4.4 手順 8 の「`REQUESTED` の滞留通知」が**ポーラーは正常なのに発報し続ける**（誤アラート）。人間の側にも理由が返らない。取り消しという形で返すほうが運用上正しい。
 
-| 終了 | `result_summary` の固定文言 |
-| --- | --- |
-| 0 | `リランが正常終了しました。実行ログアプリを確認してください。` |
-| 1 | `リランを開始できませんでした（設定・検証エラー、または再開できる直近バッチが見つかりません）。実行ログアプリを確認してください。` |
-| 2 | `業務アサート違反で安全停止しました。対象データを確認してください。` |
-| 3 | `実行時エラーで終了しました。基盤と実行ログアプリを確認してください。` |
-| 4 | `一部のジョブが失敗しました。実行ログアプリを確認してください。` |
-| 5 | `別のバッチが実行中のため、受付待ちに戻しました。` |
-| signal / その他 | `終了結果を確認できません。実行ログアプリと VPS を照合してください。` |
-| stale 回収 | `確保期限を超過したため結果不明にしました。自動再実行はしていません。` |
-| 期限切れ | `指示の有効期限を超過したため実行しませんでした。` |
-| allowlist 不一致 / 受付上限超過 | `受付条件を満たさないため取り消しました。` |
+この取消は **profile ごとの `REQUESTED` 同時件数上限の判定より前**に処理し、誤操作レコードが上限を食い潰さないようにする。
 
-### 6.2 擬似コード
+stale 候補は通常要求と混ぜて claim せず、次の独立した条件で取得する。
+
+```text
+record_type in ("BATCH")
+and profile = "<ローカル profile>"
+and host = "<ローカル host>"
+and rerun_state in ("CLAIMED")
+and rerun_claim_expires_at < "<現在時刻>"
+order by started_at asc
+limit <staleRecoveryLimit>
+```
+
+API 往復を 1 回に保つ実装では両条件を括弧付き OR でまとめてよいが、取得後の配列を通常要求と stale に分割し、同じ処理関数へ渡してはならない。未選択の検索・動作確認は `rerun_state in ("")` を使い、「空」という選択肢や `rerun_state = ""` を導入しない。
+
+GET の `fields` には少なくとも `$id`、`$revision`、`更新日時`、`更新者`、`record_type`、`status`、`batch_id`、`profile`、`host`、`started_at` と 9 個の `rerun_*` を含める。
+
+### 6.2 stale 回収
+
+stale 候補は revision 条件付き PUT で `rerun_state = UNKNOWN`、固定要約、claim 情報のクリアへ更新するだけで、子プロセスを起動しない。revision 競合は別処理済みとして無視し、無条件 PUT や自動再取得による実行は行わない。1 回の回収件数を `staleRecoveryLimit` 以下に制限する。
+
+これは kSQL Flow の `recoverStale()` が RUNNING ロックを `TIMEOUT` にする処理とは別である。ランナー側の stale 回収が元 BATCH の revision を進める可能性は、§6.5 の競合処理で扱う。
+
+### 6.3 通常要求の受付、有効期限、初回証跡
+
+通常要求は FIFO の先頭 1 件だけを起動する。profile ごとの同時 `REQUESTED` 件数が上限を超えた場合は、新しい超過分を 1 回の取消上限まで revision 条件付きで `CANCELED` にする。
+
+有効期限の基準は `rerun_requested_at` だけとする。ただし人間が初めて `rerun_state` を `REQUESTED` にした時点では空欄なので、初回候補 GET では次の規則で有効な要求時刻と要求者を決める。
+
+* `rerun_requested_at` が空なら、GET で得た `更新日時` を要求時刻とする
+* `rerun_requested_by` が空なら、同じ GET で得た `更新者` の **`code`** を要求者とする。`name`（表示名）は改姓・改名で変わるため証跡に使わない
+* claim PUT で、この 2 値を `CLAIMED` と同時に退避する
+* 既に値があれば保持し、Exit 5 後の再 claim でも書き換えない
+
+有効期限判定はこの有効な要求時刻に対して行う。期限超過なら revision 条件付きで `EXPIRED` にし、起動しない。`更新日時` を継続的な期限基準にしてはならない。Exit 5、結果更新、ランナーの `resendPending()` / `recoverStale()` により更新日時が進み、期限が延長されるためである。BATCH の `作成日時` も要求時刻ではないため使わない。
+
+**既知の限界**: 初回の `更新日時` はあくまで要求時刻の代理である。退避される前にランナーの `resendPending()` / `recoverStale()` が同じレコードを更新すると、`更新日時` が進んで TTL の起点が後ろへずれる。成立条件は「ポーラーが長時間停止している」かつ「そのレコードに再送保留がある」で稀であり、挙動も期限が延びる側（緩い側）に倒れるだけなので、追加の対策は取らない。
+
+### 6.4 claim と子プロセス起動
+
+候補 GET の `$revision` を条件に PUT し、次を一体で更新する。
+
+* `rerun_state = CLAIMED`
+* `rerun_claimed_host = <ローカル host>`
+* `rerun_claim_expires_at = 現在 + batchTimeoutSec + 余裕`
+* `rerun_attempt = 既存値 + 1`
+* 初回だけ `rerun_requested_at` / `rerun_requested_by` を退避
+* 前回の `rerun_exit_code` / `rerun_result` / `rerun_batch_id` をクリア
+
+claim の revision 競合時は、別の書き手が先に更新したものとして子プロセスを起動せず Exit 0 とする。claim 成功応答の新 revision を保持し、その revision を結果更新へ連鎖させる。
+
+claim 成功後だけ、ローカル設定の固定絶対パスを argv 配列で起動する。起動する子プロセスは `run_batch.sh --resume` の 1 つだけである。stdout / stderr は既存 cron ログへ流すが、メモリに捕捉せず、kintone へ転記しない。ポーラーから `git` は起動しない。
+
+### 6.5 revision 連鎖と競合時の再適用
+
+通常の成功経路は次の revision 連鎖とする。
+
+```text
+候補 GET の revision r0
+  -> claim PUT(revision=r0)
+  -> 応答 revision r1
+  -> 結果 PUT(revision=r1)
+```
+
+kSQL Flow の `LogAppClient.update()` は revision 条件を付けない。さらに `resendPending()` は前回失敗したログ書込を次回実行時に旧レコードへ再送し、`recoverStale()` も RUNNING レコードを更新する。このため、claim 後に元の失敗 BATCH の revision が進み、結果 PUT が競合する可能性がある。ただしランナーは `rerun_*` を一切書かないため、リラン状態の値は競合で壊れない。
+
+結果 PUT が revision 競合した場合は、同じ `$id` を 1 回だけ再 GET する。`rerun_state = CLAIMED`、`rerun_claimed_host` が自ホスト、要求の証跡が claim 時と一致することを確認し、最新 revision を条件に同じ `rerun_*` 結果を 1 回だけ再適用する。再 GET で別状態になっていた場合、または再適用も失敗した場合は、それ以上更新せず stale 回収と人手照合に委ねる。無条件 PUT、無制限リトライ、子プロセスの再起動は行わない。
+
+### 6.6 `rerun_batch_id` と `git_ref` の確定
+
+Exit 5 以外では、子プロセス終了後に同じログアプリを 1 回 GET し、次をすべて満たす BATCH を検索する。
+
+* `record_type = BATCH`
+* `profile` / `host` がローカル設定値と一致
+* `started_at` が claim 時刻より後
+* 元の要求レコード自身ではない
+
+GET の `fields` に `batch_id` と `git_ref` を含める。ポーラーは `git` を起動せず、実行時 git リビジョンはこの照合結果から運用ログへ記録する。`git_ref` は実行可否の条件にしない。
+
+候補件数ごとの規則は次のとおりである。
+
+| 候補件数 | `rerun_batch_id` | 理由 |
+| --- | --- | --- |
+| 0 件 | 空欄 | resume 対象が無い場合、`runAll.ts` は BATCH 作成前に Exit 0 を返すため正常 |
+| 1 件 | その BATCH の `batch_id` | 帰属を一意に確定できる |
+| 2 件以上 | 空欄 | claim から結果更新までに定期 cron が割り込むと帰属を断定できない |
+
+0 件と 2 件以上は異常にせず、Exit 0 なら `SUCCESS` とする。別 host / profile、JOB、claim 以前の BATCH を採用しない。
+
+### 6.7 Exit Code と固定要約
+
+| Exit / 事象 | `rerun_state` | `rerun_result` の固定文言 |
+| --- | --- | --- |
+| 0 | `SUCCESS` | `リランが正常終了しました。実行ログアプリを確認してください。` |
+| 1 | `FAILED` | `リランを開始できませんでした（設定・検証エラー、または再開できる直近バッチが見つかりません）。実行ログアプリを確認してください。` |
+| 2 | `FAILED` | `業務アサート違反で安全停止しました。対象データを確認してください。` |
+| 3 | `FAILED` | `実行時エラーで終了しました。基盤と実行ログアプリを確認してください。` |
+| 4 | `FAILED` | `一部のジョブが失敗しました。実行ログアプリを確認してください。` |
+| 5 | `REQUESTED` | `別のバッチが実行中のため、要求状態に戻しました。` |
+| signal / その他 | `UNKNOWN` | `終了結果を確認できません。実行ログアプリと VPS を照合してください。` |
+| stale 回収 | `UNKNOWN` | `確保期限を超過したため結果不明にしました。自動再実行はしていません。` |
+| 期限切れ | `EXPIRED` | `要求の有効期限を超過したため実行しませんでした。` |
+| 受付上限超過 | `CANCELED` | `受付条件を満たさないため取り消しました。` |
+| 対象が失敗系でない | `CANCELED` | `対象が失敗したバッチではないため取り消しました。失敗した実行の記録を選び直してください。` |
+
+Exit 1 は設定不備だけでなく、再開できる直近バッチが無い場合にも返るため、原因を断定しない。Exit 5 は失敗ではなく待機であり、`rerun_attempt` と初回の `rerun_requested_at` / `rerun_requested_by` を保持して `REQUESTED` へ戻す。signal や 0〜5 以外は成功・失敗を断定しない。
+
+結果更新では `rerun_exit_code`、`rerun_result`、`rerun_batch_id` を設定し、`rerun_claimed_host` / `rerun_claim_expires_at` をクリアする。固定辞書以外の API 本文、例外、stdout、stderr、SQL、レコード値は格納しない。
+
+### 6.8 1 回の処理順
 
 ```text
 poll_control.sh:
-  /usr/bin/flock -n <固定ロック> を取得できなければ Exit 0
-  固定絶対パスの /usr/bin/node で poll_control.mjs を exec
+  flock を取得できなければ API を呼ばず Exit 0
+  固定絶対パスの Node で poll_control.mjs を exec
 
 poll_control.mjs:
-  設定を読み、schema・絶対パス・allowlist・環境変数を検証
+  設定・環境変数・絶対パス・TTL 整合を検証
   現在時刻を一度確定
-
-  GET 実行指示レコード:
-    対象ホスト = 自ホスト AND
-    (状態 = 受付待ち OR
-     (状態 = 実行中 AND 確保期限 < 現在))
-    作成日時 asc、有限の limit、必要 fields のみ
-
-  期限超過した実行中を、最大 staleRecoveryLimit 件処理:
-    取得した $revision を付けて 状態=結果不明、固定要約 を PUT
-    revision 競合なら他処理済みとして無視
-
-  受付待ちが無ければ Exit 0
-  最古の受付待ち candidate を選ぶ
-  operation / target_profile / target_host / state を列挙値で再検証
-  allowlist 不一致なら revision 付きで 取消 + 固定要約、起動しない
-
-  candidate の profile について受付待ち一覧を有限件 GET
-  pendingLimit を超える新しい指示を overflowUpdateLimit 件まで、
-    revision 付きで 取消 + 固定要約に更新
-  candidate 自身が上限外なら起動せず Exit 0
-
-  作成日時 + requestTtlSec < 現在なら:
-    revision 付きで 状態=期限切れ + 固定要約 を PUT
-    Exit 0
-
-  profile allowlist から固定 command / args / cwd / claimTimeout を取得
-
-  revision 付き PUT で claim:
-    状態=実行中、確保ホスト、自ホスト、確保期限、実行開始日時、
-    試行回数+1、前回結果フィールドをクリア
-  revision 競合なら誰かが確保したため、起動せず Exit 0
-  応答の新 revision を保持
-
-  spawn(command, args, { cwd, shell:false, stdio:'inherit' })
-  子の stdout / stderr は既存 cron ログへ流すだけで、メモリに捕捉しない
-  終了 code / signal を受け取る
-
-  Exit 5 以外でログアプリを 1 回検索し、
-    profile・host・claim 後の started_at に合う BATCH の
-    batch_id と git_ref を取得（fields で限定）
-    該当 0 件 → 両方とも空欄のまま正常終了（下の注記）
-    該当 2 件以上 → 帰属を断定せず空欄にする（下の注記）
-  batch_id が取れた場合だけ固定形式のログ検索 URL を生成
-
-  exitMap から state と固定 result_summary を選ぶ
-    0 => 完了
-    1 / 2 / 3 / 4 => 失敗
-    5 => 受付待ち（exit_code・終了時刻を記録、claim 欄をクリア）
-    signal / その他 => 結果不明
-
-  claim 応答の revision を付けて結果を PUT
-  revision 競合または API 障害なら秘密を含まないローカル警告だけを出し、
-    次回 stale 回収に委ねて非 0 終了
+  通常要求と stale 候補を有限件数で取得
+  stale 候補を UNKNOWN へ回収するだけで、実行対象に混ぜない
+  REQUESTED の上限超過分を有限件数だけ CANCELED にする
+  FIFO 先頭の通常要求について、初回要求時刻・要求者を確定
+  期限超過なら EXPIRED にして終了
+  revision 条件付きで CLAIMED に更新し、初回証跡を退避
+  claim 成功時だけ固定 argv で run_batch.sh --resume を 1 回起動
+  Exit 5 以外は新 BATCH を照合し、0 / 1 / 2件以上の規則を適用
+  claim 応答 revision を条件に結果を書き戻す
+  revision 競合なら再 GET + 1 回だけ再適用
 ```
-
-**実行バッチ照合が空欄になる 2 つの正常系**（実装者が異常と誤解しないこと）:
-
-* **該当 0 件** — `--resume` は再実行対象が無ければ BATCH レコードを作らずに Exit 0 で終わる。`runAll.ts` は resume 選抜の直後（`--resume: 再実行が必要なジョブはありません`）で return し、BATCH レコードの作成はそれより後段だからである。**指示は `完了` でよく、`execution_batch_id` は空欄が正しい**
-* **該当 2 件以上** — claim から結果書き戻しまでの間に定期 cron のバッチが割り込むと、同一 host・同一 profile の BATCH が複数並ぶ。この 2 つは host / profile では区別できないため、**帰属を断定せず空欄にする**。誤ったバッチへのリンクを出すより空欄のほうが安全である
-
-`executed_git_ref` はポーラーから `git` を起動して取得しない。**ランナー自身が BATCH レコードへ `git_ref` を記録している**（`runAll.ts` の `git_ref: resolveGitRef(dir)`）ため、上の照合 GET の `fields` に含めれば **API 消費を増やさずに**取得できる。子プロセス起動が 1 つ減り、§8.1 で守るべき攻撃面も減る。照合が空欄になる場合は `executed_git_ref` も空欄とする。
-
-stale 回収は `結果不明` にするだけで再実行しない。ログアプリの `execution_batch_id` と実行指示の時刻を人間が照合し、必要なら新しい指示を追加する。これは at-least-once であって exactly-once ではない。
 
 ## 7. kintone REST API と消費回数
 
-使用 API はレコード取得と 1 件更新だけに限定し、アプリ作成・フィールド取得・権限変更 API はランタイムから呼ばない。
+通常ポーリングは `GET /k/v1/records.json` 1 回で通常要求と stale 候補を取得する。候補が無ければそこで終了する。
 
-| 用途 | HTTP / エンドポイント | 主なパラメータ | 1回のポーリングでの回数 |
-| --- | --- | --- | --- |
-| 待機・stale 候補取得 | `GET /k/v1/records.json` | `app`, `query`, `fields`。自ホスト、`受付待ち` または期限超過 `実行中`、`order by 作成日時 asc`、有限 `limit` | 常に 1 |
-| profile 別の受付上限確認 | `GET /k/v1/records.json` | `app`, `query`, `fields`。候補と同じ host/profile の `受付待ち`、作成日時 asc、有限 `limit` | 候補あり時 1 |
-| stale / 期限切れ / overflow 更新 | `PUT /k/v1/record.json` | `app`, `id`, `revision`, 許可された固定 `record` | 対象1件につき1、各設定上限まで |
-| claim | `PUT /k/v1/record.json` | `app`, `id`, 取得した `revision`, claim fields | 起動候補1件につき1 |
-| 結果書き戻し | `PUT /k/v1/record.json` | `app`, `id`, claim 応答の `revision`, result fields | claim 成功時1 |
-| 実行バッチ照合 | `GET /k/v1/records.json`（ログアプリ） | `record_type = BATCH`, `profile`, `host`, `started_at`, order/limit。`fields` は `batch_id` と `git_ref` に限定 | claim 成功かつ Exit 5 以外で最大1 |
+| 経路 | 主な API | 回数の目安 |
+| --- | --- | --- |
+| 待機ポーリング | 候補 GET | 5 分ごと、**288 回/日** |
+| 通常リラン | claim PUT + BATCH 照合 GET + 結果 PUT | **1 回あたり 3 回** |
+| 競合・補助更新あり | 再 GET + 再適用、期限切れ、stale、Exit 5 等 | **1 回あたり概ね 4 回以上** |
+| 導入・設定変更 | 自前 check のフィールド定義 GET | 通常ポーリング外の都度実行 |
 
-ゲストスペースを使う場合だけ `/k/guest/{guestSpaceId}/v1/...` に固定変換する。API トークンは `X-Cybozu-API-Token` ヘッダーで送り、URL、本文、例外、ログへ出さない。
+固定費 288 回/日と、リラン 1 回あたり 3〜4 回の変動費は、**既存の実行ログアプリの日次 API 枠に載る**。専用アプリの別枠ではない。複数ホストなら固定費は `288 × ホスト数` になる。待機中は業務アプリの枠を消費せず、実際の resume が業務アプリを操作した分はランナー側の通常消費となる。
 
-代表的な指示アプリ側の API 消費は次のとおり。
+HTTP クライアントは timeout、応答サイズ上限、非 JSON、同一 origin 外 redirect を拒否する。429 / retryable 5xx の再試行は回数上限と総時間上限を持つ。revision 競合は通常の HTTP リトライ対象にせず、§6.5 の意味論で処理する。応答喪失後の PUT を無条件に再送しない。
 
-| 経路 | 指示アプリ | ログアプリ | 備考 |
-| --- | ---: | ---: | --- |
-| 待機、対象なし | 1 | 0 | 5分間隔なら 288回/日 |
-| claim 競合 | 3 | 0 | 候補取得 + 上限確認 + 競合する claim PUT |
-| 期限切れ | 3 | 0 | 候補取得 + 上限確認 + PUT |
-| Exit 0 / 1 / 2 / 3 / 4 | 4 | 1 | 候補取得 + 上限確認 + claim + 結果。別途ランナーの API 消費あり |
-| Exit 5 | 4 | 0 | 結果 PUT で `受付待ち` へ戻す |
-| stale 1件回収、待機なし | 2 | 0 | GET + PUT |
+## 8. セキュリティ要件
 
-overflow と stale が同じ回に複数ある場合でも、更新件数は設定上限を超えない。ランナーが resume 中に使う業務アプリ・ログアプリの API は従来どおりであり、ポーラーの表へ混ぜない。
+* 起動する command、args、cwd、環境変数名、API パスはローカル設定の allowlist に固定する
+* レコード値からパス、argv、cwd、環境変数名、URL を組み立てない
+* `spawn(..., { shell: false })` を使い、`sh -c`、文字列 command、shell 展開を禁止する
+* 起動する子プロセスは `run_batch.sh --resume` だけとし、`git`、`curl`、任意コマンドを起動しない
+* stdout / stderr は kintone へ転記しない。固定要約辞書と `rerun_batch_id` だけを書き戻す
+* トークン、API エラー本文、認証ヘッダー、SQL リテラル、レコード値をポーラーログへ出さない
+* URL は HTTPS、設定 origin 固定とし、同一 origin 外 redirect を拒否する
+* profile ごとの `REQUESTED` 上限、候補 GET limit、overflow / stale 更新上限、1 ポーリング 1 起動、HTTP 応答サイズ上限で DoS を抑制する
+* `.env` は Git 管理外、`chmod 600`、ポーラーと通常バッチは同じ専用 OS ユーザーで動かす
+* API トークンがフィールド単位アクセス権の対象外であることを運用手順へ明記する
 
-## 8. セキュリティ要件の具体化
+## 9. cron と GitHub Actions
 
-### 8.1 argv 配列起動
+### 9.1 cron
 
-* 子プロセスは Node の `spawn` を `shell: false` で呼ぶ
-* `command`、`args`、`cwd` は検証済みローカル設定からのみ取得し、すべて絶対パスとする
-* `args` は第1段階では正確に `--resume` だけを許可する
-* `exec`、`execSync`、`sh -c`、テンプレート文字列で作ったコマンドは lint 相当のレビュー検索とテストで禁止する
-* **ポーラーが起動する子プロセスは `run_batch.sh` の 1 つだけ**とする。`git` は起動しない（`git_ref` はログアプリの BATCH レコードから取得する — §6.2）
-
-### 8.2 レコード値は allowlist キーだけに使う
-
-* `operation` は `リラン`、`target_host` は設定の自ホスト、`target_profile` は profile map の own key と完全一致した場合だけ受理する
-* Unicode 正規化、前方一致、大文字小文字変換、パス結合による「近い値」の受理はしない
-* レコードの `request_key`、作成者、文字列を argv、cwd、ファイル名、環境変数名、URL host へ渡さない
-* kintone query へ入れる host/profile はローカル設定値だけとし、kintone レコードから再投入しない。クエリ文字列用の引用符・バックスラッシュ拒否も設定検証で行う
-
-### 8.3 stdout / stderr を転記しない
-
-* 子プロセスの `stdio` は `inherit` とし、捕捉・連結・正規表現抽出をしない
-* `result_summary` は Exit Code ごとの固定辞書からだけ選ぶ。API エラー本文、例外 stack、SQL、レコード値を含めない
-* `execution_batch_id` は stdout から取らず、ログアプリの構造化フィールドを限定 GET して取得する
-* `log_url` は設定済み base URL、数値 app ID、検証済み UUID 形式 batch ID からだけ生成する
-* ポーラー自身のローカルログもトークンと HTTP Authorization header を出さず、HTTP status、固定分類、指示レコード ID までに制限する
-
-### 8.4 DoS 上限
-
-* 1回のポーリングで起動する子プロセスは最大1件
-* profile ごとの `受付待ち` は古い順に `pendingLimit` 件だけを有効とし、超過分は1回あたり `overflowUpdateLimit` 件まで revision 付きで `取消` にする
-* 有効期限を超えた指示は実行しない
-* stale 回収、overflow 更新、取得 limit、HTTP 応答サイズ、HTTP タイムアウトをすべて有限値にする
-* `flock` と kSQL Flow の分散ロックを両方残す。前者はポーラーの多重実行、後者は通常 cron・SSH・ポーラー間のバッチ衝突を防ぐ
-* Exit 5 は失敗扱いせず `受付待ち` に戻すが、毎回 `attempt_count` を増やす。指示自体の有効期限を延長しないため、通常バッチが長引いても最後は `期限切れ` になる
-
-### 8.5 その他
-
-* base URL は `https:` のみ許可し、redirect は同一 origin だけ許可するか無効化する
-* API 応答は Content-Type、JSON shape、フィールド type、列挙値を検証してから使う
-* revision を省略した更新は実装しない。stale、期限切れ、overflow、claim、結果の全更新で取得済み revision を指定する
-* kintone 429 / 列挙済み一時障害は、指示の多重実行につながらない GET と PUT 前の通信失敗だけを有限回再試行する。レスポンス喪失後の PUT は成否不明なので無条件再送せず、再 GET で revision と状態を確認する
-* SIGTERM / SIGINT では、新規 claim を止める。子が未起動なら claim を `受付待ち` へ戻し、子の起動後なら成功を推測せず stale 回収に委ねる
-
-## 9. cron 登録
-
-#9 の `run_batch.sh` と同じジョブリポジトリ、同じ専用 OS ユーザー、同じ `.env` を使う。通常バッチの cron 行は変更せず、その下にポーラーを追加する。
+通常バッチの cron 行は変更せず、その下にポーラーを追加する。既定は終日 5 分間隔とする。
 
 ```cron
-7 6 * * * /opt/ksql/my-ksql-jobs/run_batch.sh >> /var/log/ksql/batch.log 2>&1
 */5 * * * * /opt/ksql/my-ksql-jobs/scripts/poll_control.sh >> /var/log/ksql/poll-control.log 2>&1
 ```
 
-`poll_control.sh` は自身のディレクトリからリポジトリルートを固定的に解決し、`/usr/bin/flock`、`/usr/bin/node --env-file=<固定 .env> <固定 poll_control.mjs> --config <固定 config>` を `exec` する。実際の絶対パスは `command -v node` と `command -v flock` で配備時に確認してからテンプレート値を置換する。
+営業時間限定を既定にも推奨にもしてはならない。この仕組みの目的は休日・外出先でも通知から復旧できることだからである。運用上ポーリング空白を設ける場合は、その最大空白時間より要求有効期限を長くしなければならず、有効期限が空白時間以下なら起動時に停止する。
 
-### 9.1 既定は終日ポーリングとする
-
-**ポーリング時間帯を営業時間・平日に絞ってはならない。** この設計が解こうとしている問題は `rerun_trigger_design.md` §1 のとおり **「休日・外出先で、通知は届くのに直せない」** ことであり、平日 7〜20 時限定のポーリングは**その状況でだけ動かない**。
-
-有効期限（§5.2）と組み合わさると失敗する。
-
-* 土曜 9:00 に指示を追加 → 次のポーリングは月曜 7:00
-* 既定の有効期限 6 時間は土曜 15:00 に切れている
-* 月曜 7:00 のポーラーは `期限切れ` にするだけで、**何も実行しない**
-
-したがって既定は `*/5 * * * *`（終日・288 回/日）とする。指示アプリは専用アプリであり、日次上限（スタンダードコース 10,000 回）に対して **2.9%** なので終日でも余裕がある。
-
-営業時間帯に絞る運用を選ぶ場合は、**有効期限をポーリング空白時間より長く取る**こと（週末を挟むなら 72 時間以上）。この 2 つは独立に設定できてしまうため、§5.2 の起動時検証で整合を強制する。
-
-`poll-control.log` は logrotate 対象にする。ログの正は kintone 側である。
+`poll_control.sh` は自身の場所からリポジトリルートを固定的に解決し、固定パスの `flock` と Node を使う。導入時に `command -v node` と `command -v flock` で実パスを確認してファイルへ固定する。`poll-control.log` は logrotate 対象にする。
 
 ### 9.2 GitHub Actions（#6）との関係
 
-配備先の多くは #6 のワークフローを併用している。
-
-* **ワークフローファイルの変更は不要**（`daily-batch.yml` / `pr-check.yml` とも）
-* **復旧目的で Actions を残す必要がなくなる。** #9 では「復旧用に `workflow_dispatch` を残すなら書込可トークンを GitHub Secrets にも置く必要があり、露出面が減るという利点とのトレードオフ」と書いた。本ポーラーがあれば **GitHub には閲覧のみトークンだけ**という構成が完全に成立する（`rerun_trigger_design.md` の案 A は役目を終える）
-* **定期実行の主は 1 つに決める。** Actions の `daily-batch` と VPS の cron を両方有効にすると二重スケジュールになる。ポーラーが加わり起動経路は 4 つ（cron・ポーラー・Actions・SSH）になるため、運用手順に明記する。衝突自体はログアプリの分散ロックが Exit 5 で止め、ポーラーは `target_host` でルーティングされるので Actions が指示を拾うことはない
-* Actions 側に本ポーラーは載せない。実行環境が使い捨てでポーリングが成立せず、そもそもブラウザからの `workflow_dispatch` がある
+* `daily-batch.yml` / `pr-check.yml` ともワークフローファイルの変更は不要である
+* 復旧用 `workflow_dispatch` を残す必要がなくなり、書込可トークンを GitHub Secrets に置かない構成にできる
+* 定期実行の主は VPS cron または Actions のどちらか 1 つに決め、両方を有効にしない
+* ポーラーは VPS / オンプレ専用であり、使い捨ての Actions runner には載せない
+* cron、ポーラー、Actions、SSH が衝突しても仕様 §5.5 の分散ロックが Exit 5 で止めるが、ロックを二重スケジュールの常用手段にはしない
 
 ## 10. テスト計画
 
-### 10.1 ローカルで確認すること
+### 10.1 ローカル試験
 
-Node 22 の `node:test` とローカル HTTP モックを使い、実 kintone や実ランナーを必要としない状態機械を網羅する。
+Node 22 の `node:test` とローカル HTTP モックを使い、実 kintone と実ランナーを必要としない状態機械を網羅する。
 
-* 設定: 未知キー、相対パス、非 HTTPS、未定義 token、allowlist 不一致、範囲外上限を API 前に拒否
-* query: host/profile がローカル設定だけから作られ、FIFO、limit、必要 fields が正しい
-* 有効期限: 境界直前は claim、境界時刻以後は `期限切れ`
-* claim: GET の revision を PUT へ渡すこと、競合エラー時に spawn しないこと
-* 起動: `shell:false`、固定 command/cwd、args が `--resume` のみであること。空白・引用符・改行・`../` を含むレコード値でも argv が変わらないこと
-* Exit: 0 / 1 / 2 / 3 / 4 / 5、signal、未知 code の状態・固定要約・claim クリアを表どおり検証
-* Exit 5: `受付待ち` へ戻り、attempt が増え、有効期限の起点が変わらないこと
-* stale: 期限前は触らず、期限後は `結果不明`、自動再起動しないこと
-* DoS: profile 上限、1回1起動、overflow/stale/API 取得 limit が設定上限を超えないこと
-* 秘密: token、API エラー本文、子 stdout/stderr、悪意あるレコード値が PUT 本文とポーラーログに現れないこと
-* 実行バッチ照合: claim より前、別 host/profile、JOB レコードを除外し、**該当 0 件（resume 対象なし）と該当 2 件以上（cron 割り込み）はいずれも空欄で `完了`** すること。`executed_git_ref` も同じ GET から取れ、`git` を起動しないこと
-* 設定整合: 指示有効期限がポーリング空白時間以下なら API 呼び出し前に停止すること（§9.1）
-* HTTP: timeout、429、5xx、revision 競合、応答喪失、非 JSON、巨大応答、同一 origin 外 redirect
-* `flock`: 2プロセスを同時起動して片方だけが API モックへ到達すること
+* **設定**: 未知キー、相対パス、非 HTTPS、未定義 token、`--resume` 以外の args、範囲外上限を API 前に拒否する
+* **Schema check**: 9 フィールドの欠落、型違い、`rerun_state` の不足・余分な選択肢、必須化を検出する。既存 `init-logapp` / `--check-logapp` に依存しない
+* **クエリ**: `record_type = BATCH`、ローカル profile / host、失敗系 status、`REQUESTED`、`started_at asc`、有限 limit を確認する。未選択が `in ("")` であることも確認する
+* **通常 / stale 分離**: stale は `UNKNOWN` 更新だけで spawn せず、通常要求だけが claim へ進む
+* **初回証跡**: 最初の GET の `更新日時` / `更新者` を claim と同時に退避し、Exit 5 後の再 claim では変わらない
+* **有効期限**: `rerun_requested_at` の境界直前は claim、境界時刻以後は `EXPIRED`。`更新日時` が進んでも延長しない
+* **claim**: GET の revision を PUT に渡し、競合時に spawn しない。claim 応答 revision を結果 PUT へ渡す
+* **結果競合**: claim 後にランナー相当の無条件更新を挟み、結果 PUT 競合後の再 GET + 1 回再適用で成功する。2 回目も失敗したら停止する
+* **起動**: `shell: false`、固定 command / cwd、args が `--resume` だけである。空白、引用符、改行、`../` を含むレコード値でも argv が変わらない
+* **Exit**: 0 / 1 / 2 / 3 / 4 / 5、signal、未知 code の状態と固定要約を §6.7 どおり検証する
+* **Exit 5**: `REQUESTED` へ戻り、attempt は増え、要求日時・要求者・有効期限の起点は変わらない
+* **BATCH 照合**: claim 以前、要求レコード自身、別 host / profile、JOB を除外する。0 件は空欄、1 件だけ採用、2 件以上も空欄とする。照合 fields に `git_ref` があり、`git` を起動しない
+* **DoS**: 1 回 1 起動、`REQUESTED` 上限、候補取得、overflow / stale 更新、応答サイズが設定上限を超えない
+* **秘密**: token、API 本文、子 stdout / stderr、悪意あるレコード値が PUT 本文とポーラーログに現れない
+* **HTTP**: timeout、429、retryable 5xx、revision 競合、応答喪失、非 JSON、巨大応答、同一 origin 外 redirect
+* **flock**: 2 プロセスを同時起動し、片方だけが API モックへ到達する
+* **静的検査**: `sh -c`、文字列 command、トークン出力、`git` / `curl` 起動がない
 
-子プロセスは Exit Code だけを返す偽 `run_batch.sh` を一時ディレクトリに置き、kSQL Flow 本体を変更せずに試験する。実装ファイルの静的検索でも `sh -c`、`exec(`、文字列 command、トークン出力、**`git` の起動**がないことを確認する。
+子プロセス試験には Exit Code だけを返す偽 `run_batch.sh` を一時ディレクトリへ置く。kSQL Flow 本体やエンジンは変更しない。
 
-### 10.2 VPS 実機でしか確認できないこと
+### 10.2 VPS 実機で確認すること
 
-* cron の環境差（cwd、PATH、Node、`.env`）、実行ユーザー、ファイル権限、`flock` の実際の保持
-* outbound HTTPS、DNS、TLS、kintone API トークン権限、フィールドアクセス権
-* 実 kintone の revision 競合エラーと通知条件
-* 通常 cron、ポーラー、SSH 手動実行が kSQL Flow のローカルロック・ログアプリ分散ロックで衝突すること
-* v0.4.0 のログアプリに記録された batch ID、as-of 引き継ぎ、git_ref と指示レコードの照合
-* cron 自然発火、ポーラー停止時の「受付待ち」滞留通知、logrotate
+* cron の cwd、PATH、Node、`.env`、実行ユーザー、権限、`flock` の保持
+* outbound HTTPS、DNS、TLS、既存ログアプリ用 API トークンの権限
+* 実ユーザーにはフィールド単位アクセス権が効き、API トークンには効かないこと
+* 自前 check が 9 フィールドの型・選択肢を検証し、不備時に実行しないこと
+* 実 kintone の revision 競合と、ランナーの revision 条件なし更新後の再 GET + 1 回再適用
+* 通常 cron、ポーラー、SSH 手動実行がローカルロック・ログアプリ分散ロックで衝突すること
+* v0.4.0 の `--resume` 選抜、元 as-of 引き継ぎ、BATCH 作成、`git_ref` 記録
+* 終日 cron の自然発火、`REQUESTED` 滞留通知、logrotate
+* 実測 API 回数が待機時 1 回 / poll、リラン時 3〜4 回程度でログアプリ枠に載ること
 
 ### 10.3 VPS 実機ドリル
 
-実行指示は `request_key = KSQL_FLOW_TEST_<日時>_<シナリオ>` とする。業務アプリへデータを仕込む場合も、一意キーを `KSQL_FLOW_TEST_` で始め、試験後はその prefix だけを明示抽出して削除する。既存レコードを流用・変更しない。
+元 BATCH の `script_name` など識別可能な試験値と、業務アプリへ仕込む一意キーは `KSQL_FLOW_TEST_<日時>_<シナリオ>` とする。既存レコードを流用・変更しない。試験後は prefix で対象 ID を明示抽出し、削除前一覧、削除対象 ID、削除後 0 件を記録する。
 
-1. **Exit 0**: `KSQL_FLOW_TEST_EXIT0` の一時障害を解消して指示を追加する。`受付待ち → 実行中 → 完了`、元 as-of 引き継ぎ、batch ID、ログリンク、stdout 非転記を確認する。resume 対象なしの Exit 0 も別に確認する。
-2. **Exit 2**: `KSQL_FLOW_TEST_ASSERT` の ASSERT 違反用データを残したまま指示する。`失敗`、Exit 2、書込前停止、固定要約だけを確認する。
-3. **Exit 3**: テスト profile のみ到達不能 URLまたは無効なテスト用 token に切り替えて指示する。`失敗`、Exit 3、token/API 本文が指示・ログへ出ないことを確認し、直後に設定を戻す。
-4. **Exit 5**: 通常の `run_batch.sh` をテスト用長時間ジョブで保持し、その間にリラン指示を claim させる。指示が `受付待ち` へ戻り attempt が増え、通常実行終了後かつ有効期限内の次回ポーリングで再 claim されることを確認する。
-5. **有効期限切れ**: テスト設定だけ有効期限を短くし、古い `KSQL_FLOW_TEST_EXPIRED` を作る。spawn なしで `期限切れ` になることを確認する。
-6. **claim 競合**: テスト用の別 lock ファイルを持つ2ポーラーを、同一 host/profile の同じ指示へ同時に向ける。revision PUT は片方だけ成功し、子プロセス起動が1回だけであることをログアプリとモック副作用で確認する。本番 lock を無効化しない。
-7. **ポーラー異常終了（子起動前）**: claim 直後で停止できるテストフック版を使い、短い claim 期限後に次のポーラーが `結果不明` へ回収し、自動再実行しないことを確認する。
-8. **ポーラー異常終了（子起動後）**: 子実行中にポーラーへ SIGKILL を送り、kSQL Flow 側ログの結果と指示側 `結果不明` を人間が照合できることを確認する。同じ指示の自動再実行は行わない。
-9. **ポーラー停止通知**: cron 行を一時コメントアウトし、`受付待ち` が通知閾値を超えたとき kintone 条件通知が届くことを確認して復旧する。
-10. **権限**: 依頼者、通知受信者、運用管理者、API token の各主体で 4.2 の許可・拒否を実測する。
+1. **権限と Schema**: 実ユーザーは `rerun_state` だけ編集でき、他フィールドは編集できないこと、API トークンは全フィールドを編集できること、自前 check が 9 フィールドを検査することを確認する。
+2. **Exit 0**: `KSQL_FLOW_TEST_EXIT0` の一時障害を解消し、失敗 BATCH を `REQUESTED` にする。`REQUESTED -> CLAIMED -> SUCCESS`、要求日時・要求者、元 as-of、batch ID、stdout 非転記を確認する。resume 対象 0 件も別に確認し、`SUCCESS` かつ `rerun_batch_id` 空欄を確認する。
+3. **Exit 2**: `KSQL_FLOW_TEST_ASSERT` の ASSERT 違反データを残して要求し、`FAILED`、Exit 2、書込前停止、固定要約だけを確認する。
+4. **Exit 3**: テスト profile だけ到達不能 URL または無効なテスト用 token に切り替え、`FAILED`、Exit 3、token / API 本文の非露出を確認して直後に戻す。
+5. **Exit 5**: 長時間の通常バッチ中に要求する。`CLAIMED -> REQUESTED`、attempt 加算、要求日時・要求者の不変、通常実行終了後かつ期限内の再 claim を確認する。
+6. **有効期限**: `KSQL_FLOW_TEST_EXPIRED` を使い、`更新日時` ではなく退避済み `rerun_requested_at` を基準に spawn なしで `EXPIRED` になることを確認する。
+7. **claim 競合**: テスト用の別 lock ファイルを持つ 2 ポーラーを同じ要求へ向け、revision PUT は片方だけ成功し、起動が 1 回だけであることを確認する。本番 lock は無効化しない。
+8. **結果更新競合**: claim 後、テスト用手順で元 BATCH の既存フィールドを更新して revision を進める。最初の結果 PUT が競合し、再 GET + 1 回再適用で `rerun_*` 結果が保存されることを確認する。
+9. **stale（子起動前）**: claim 直後に試験用ハーネスを停止し、期限後に次回ポーラーが `UNKNOWN` へ回収し、自動再実行しないことを確認する。
+10. **stale（子起動後）**: 子実行中にポーラーを停止し、ランナーの新 BATCH と元要求の `UNKNOWN` を人間が照合できることを確認する。
+11. **BATCH 2 件以上**: claim 後に `KSQL_FLOW_TEST_` 接頭辞の**合成 BATCH レコードを投入**し、帰属を断定せず `rerun_batch_id` が空欄になることを確認する。通常実行を割り込ませる方法では再現できない — 分散ロックにより、ポーラーの resume 実行中に来た通常実行は `acquireLock()` で弾かれ、**BATCH レコードを作らずに Exit 5 で終わる**（レコード作成は `acquireLock()` 自身が行う）。実運用でこの経路に入るのは「resume 完了後・結果 PUT 前」の数秒だけであり、極めて稀である。
+12. **失敗系でない対象**: 成功した BATCH（`status = SUCCESS`）に `REQUESTED` を付け、**spawn せずに `CANCELED` + 理由の固定文言**が返ること、滞留通知の対象にならないことを確認する（§6.1）。
+13. **ポーラー停止通知**: cron 行を一時停止し、`REQUESTED` が閾値を超えたとき条件通知が届くことを確認して復旧する。
 
-テストフックは本番ファイルに隠し環境変数として残さず、試験用コピーまたは依存注入可能なローカルテストハーネスで実現する。実機ドリル後は prefix 検索結果、削除対象 ID、削除後0件を記録する。
+異常終了用フックは本番ファイルの隠し環境変数として残さず、試験用コピーまたは依存注入可能なテストハーネスで実現する。
 
-## 11. 段階分けと見積り
+## 11. 段階分け、完了条件、見積り
 
-### 第1段階: ジョブリポジトリのポーラー（MVP）
+### 第 1 段階: ジョブリポジトリのポーラー（MVP）
 
-対象: `my-ksql-jobs`、その後 `ksql-flow-template`。kSQL Flow v0.4.0 は変更しない。
+対象は `my-ksql-jobs`、実績確認後に `ksql-flow-template` とする。kSQL Flow 本体、公開 CLI、`ksql.config.json` Schema、`init-logapp`、`--check-logapp`、エンジンは変更しない。
 
 成果物:
 
-* Node 本体、`flock` ランチャー、ポーラー専用設定と設定例
-* 実行指示アプリのフィールド・アクセス権・通知設定手順
-* ローカル単体/結合テスト、秘密情報検査
-* #9 の `run_batch.sh` と同居する cron 例、logrotate 例、運用手順
-* `KSQL_FLOW_TEST_` 限定の VPS ドリル記録
-* at-least-once、結果不明時の人手照合、有効期限、Exit 5 再受付の運用説明
+* Node 22 本体、薄い `flock` ランチャー、ポーラー専用設定と設定例
+* 既存ログアプリへの 9 フィールド追加、アクセス権、一覧、通知設定の手順
+* ポーラー自前の 9 フィールド契約 check
+* ローカル単体 / 結合試験、秘密情報検査
+* 終日 cron、logrotate、GitHub Actions との役割分担、障害時の人手照合手順
+* `KSQL_FLOW_TEST_` 限定の VPS ドリル記録と後片付け記録
 
 完了条件:
 
-* Exit 0 / 2 / 3 / 5、有効期限、claim 競合、異常終了を実機で確認する
-* kSQL Flow の package、CLI、config schema、ソース、エンジンに差分がない
-* 指示レコードから任意の command/argv/cwd を作れず、stdout と秘密が書き戻されない
-* 5分間隔の自然発火と滞留通知を確認する
+* §10.1 のローカル試験がすべて通る
+* §10.3 の Exit 0 / 2 / 3 / 5、有効期限、claim 競合、結果更新競合、stale、0 件 / 2 件以上照合を実機で確認する
+* 実ユーザーと API トークンの権限差、要求日時・要求者の初回退避を実機で確認する
+* 通常要求と stale が別処理で、stale から自動再実行されない
+* kSQL Flow 本体、CLI、config schema、`init-logapp` / `--check-logapp`、エンジンに差分がない
+* レコード値から任意 command / argv / cwd を作れず、stdout、秘密、API 本文が書き戻されない
+* 終日 5 分間隔の自然発火、滞留通知、API 消費を確認する
 
-見積り: **3.5〜5人日**。
+見積り: **4.5〜6.5 人日**。
 
-* 実装・ローカルテスト: 2〜2.5人日
-* kintone アプリ構築・権限確認: 0.5〜1人日
-* VPS 配備・全ドリル・後片付け: 1〜1.5人日
+* 実装・ローカル試験: 2.5〜3.5 人日
+* 9 フィールド追加・権限・自前 check・通知設定: 0.5〜1 人日
+* VPS 配備・競合を含む全ドリル・後片付け: 1.5〜2 人日
 
-### 第2段階: `ksql-flow poll-control` 相当の公式サブコマンド化
+### 第 2 段階: 公式サブコマンド化
 
-第1段階の運用実績と API 消費、障害記録をレビューした後、別の仕様裁定と新バージョンで検討する。v0.4.0 MVP には含めない。
+第 1 段階の運用実績、API 消費、競合・障害記録をレビューした後、`ksql-flow poll-control` 相当を別の仕様裁定と新バージョンで検討する。
 
 移管候補:
 
-* `poll-control` CLI、共通 HTTP/retry/masking、設定バリデーション
-* `poll-control init-app` / `--check-control-app` 相当のアプリ作成・契約検査
-* 実行指示アプリ ZIP、README、JSON Schema、npm 配布物
-* logApp クライアントを使った batch ID の確実な照合
+* `poll-control` CLI、共通 HTTP / retry / masking、設定バリデーション
+* `poll-control check-logapp-rerun` 相当の契約検査
+* 9 フィールドを含むテンプレート ZIP、README、JSON Schema、npm 配布物
 * Linux 以外の起動・排他方式、複数ホスト実行プール
-* metrics、heartbeat、運用監視、互換性・移行ポリシー
-* help の `poll-control` 追加、Exit Code と設定エラーの公式契約
+* metrics、heartbeat、監視、互換性・移行ポリシー
+* help、Exit Code、設定エラーの公式契約
 
-公式化では「ポーラーが呼ぶ公開済み `run-all --resume` の意味論」は引き続き変えない。`--expect-batch`、`--resume-batch`、自動 resume、通常実行、バックフィルは持ち込まない。
+公式化しても公開済み `run-all --resume` の意味論は変えない。`--expect-batch`、`--resume-batch`、自動 resume、通常実行、バックフィルは持ち込まない。
 
-見積り: **4〜7人日 + リリース作業 1人日**。CLI/API 設計 1〜1.5人日、実装・移植 1.5〜2.5人日、テンプレート/ドキュメント 0.5〜1人日、クロス環境・回帰試験 1〜2人日を想定する。複数ホスト対応は別見積りとする。
+完了条件:
+
+* 第 1 段階と同じ状態機械・セキュリティ・revision 競合試験が公式 CLI で通る
+* 既存 CLI / config / `init-logapp` / `--check-logapp` の後方互換試験が通る
+* テンプレート ZIP と npm 配布物に 9 フィールド契約と秘密情報がないことを検査する
+* Linux 配布物で cron / flock の実機回帰を完了する
+
+見積り: **5〜8 人日 + リリース作業 1 人日**。
+
+* CLI / 設定 / 移行設計: 1〜1.5 人日
+* 実装・共通化: 2〜3 人日
+* テンプレート / ドキュメント / 配布物: 1〜1.5 人日
+* クロス環境・回帰試験: 1〜2 人日
+
+複数ホスト実行プールは別見積りとする。
 
 ## 12. 実装順序
 
-1. `poll-control.config.json` の契約と実行指示アプリ定義をレビュー確定
-2. HTTP クライアント、応答検証、固定要約、秘密マスキングを実装
-3. 候補取得、有効期限、revision claim、DoS 上限、stale 回収を実装
-4. argv 配列 spawn、Exit map、ログアプリ照合、結果更新を実装
-5. `flock` ランチャーと cron / logrotate を追加
-6. ローカル試験を全通過させ、静的な秘密情報・危険 API 検査を実施
-7. テスト用実行指示アプリを構築し、VPS の権限・自然発火を確認
-8. §10.3 の実機ドリルを順に実施し、prefix 限定で後片付け
-9. 実績を `ksql-flow-template` へ反映するかをレビュー
-10. 第2段階へ進む場合だけ、公式 CLI の仕様レビューを新規起票
+1. 9 フィールド、状態値、アクセス権、`poll-control.config.json` の契約をレビュー確定する
+2. 自前のログアプリ Schema check、設定検証、HTTP クライアント、固定要約を実装する
+3. 通常要求クエリと stale クエリ、FIFO、有効期限、初回証跡退避、DoS 上限を実装する
+4. revision claim、argv 配列起動、Exit map を実装する
+5. BATCH 0 / 1 / 2 件以上照合と、結果更新競合時の再 GET + 1 回再適用を実装する
+6. `flock` ランチャー、終日 cron、logrotate、運用手順を追加する
+7. §10.1 のローカル試験と静的な秘密情報・危険 API 検査を完了する
+8. 実ログアプリへ 9 フィールドとアクセス権を設定し、自前 check を通す
+9. §10.3 の VPS 実機ドリルを実施し、prefix 限定で後片付けする
+10. 第 1 段階の実績をレビューし、`ksql-flow-template` 反映と第 2 段階を別途判断する
 
 ## 13. 未決事項
 
 **無し。**
 
-実装時に値を埋める必要があるホストキー、実行指示アプリ ID、ログアプリ ID、実行時間帯、実際の依頼者グループは配備パラメータまたは運用判断であり、設計裁定を要する未決事項ではない。Q8（自動 resume）、Q9（権限主体）、Q10（手動リランと同一動作）は裁定どおりとし、再提案しない。
-
-## 14. 参照した API 契約
-
-* cybozu developer network「[複数のレコードを取得する](https://cybozu.dev/ja/kintone/docs/rest-api/records/get-records/)」— `GET /k/v1/records.json`、`app` / `fields` / `query`、最大取得件数
-* cybozu developer network「[1件のレコードを更新する](https://cybozu.dev/ja/kintone/docs/rest-api/records/update-record/)」— `PUT /k/v1/record.json`、`id` / `record` / `revision`、revision 不一致時の更新拒否
+ホストキー、ログアプリ ID、実際の依頼者グループ、絶対パスは配備パラメータまたは運用判断であり、設計裁定を要する未決事項ではない。Q8（自動 resume の却下）、Q9（kintone 標準アクセス権）、Q10（手動リランと同一動作）、Q11（専用アプリを作らずログアプリへ統合）および Q11 追補 1〜3は裁定どおりとし、再提案しない。
