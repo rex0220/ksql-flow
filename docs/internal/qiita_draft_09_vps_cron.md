@@ -505,25 +505,10 @@ VPS の復旧はこれだけです:
 
 ```bash
 ssh -i <鍵> root@<VPS>
-cd /opt/ksql/my-ksql-jobs && ./run_batch.sh --resume    # ※後述の理由でこのままでは動きません
+cd /opt/ksql/my-ksql-jobs && ./run_batch.sh --resume
 ```
 
-**ただし、本記事の `run_batch.sh` は引数を受け取りません**（`run-all ./jobs --profile prod` を固定で実行します）。resume したいときは直接叩くことになります:
-
-```bash
-cd /opt/ksql/my-ksql-jobs
-node --env-file=.env node_modules/@rex0220/ksql-flow/dist/cli.js run-all ./jobs --profile prod --resume
-```
-
-毎回これを打つのは辛いので、**引数を素通しする形にしておく**ほうが実用的です:
-
-```sh
-#!/bin/sh
-cd "$(dirname "$0")" || exit 1
-exec node --env-file=.env node_modules/@rex0220/ksql-flow/dist/cli.js run-all ./jobs --profile prod "$@"
-```
-
-こうしておけば、cron からは今までどおり（引数なし）、復旧時は `./run_batch.sh --resume` で済みます。**`--as-of "2026-08-25T00:00:00+09:00"` のバックフィル**（[#8](https://qiita.com/rex0220/items/30cac8d8b52ec8ac782a) のクラス D）も同じ形で渡せます。
+前掲の `run_batch.sh` が末尾で `"$@"` を渡しているのは、このためです。**cron からは引数なしで呼ばれ、復旧時だけ `--resume` を足せます**（実機で確認済み — as-of の引き継ぎメッセージが出ます）。**`--as-of "2026-08-25T00:00:00+09:00"` のバックフィル**（[#8](https://qiita.com/rex0220/items/30cac8d8b52ec8ac782a) のクラス D）も同じ形で渡せます。
 
 ### 出先から復旧できるか、という問題
 
@@ -595,7 +580,7 @@ systemctl list-timers ksql-batch.timer   # 次回実行時刻の確認
 - **cron の遅延は今回の実測で 1 秒**（n = 1）。[#6 の GitHub Actions（+30〜99 分）](https://qiita.com/rex0220/items/a522f7880a5960f033b3)との差は、時刻に締切があるジョブでは決定的
 - セットアップは素の Ubuntu から **約 30 分**（Node 導入 → clone → `.env` → cron）。検証時の **OS 全体の使用メモリは 357〜379MB**（`free -m` の used）で、1GB プランに余裕をもって収まる
 - 起動スクリプトは [#4 の `.bat`](https://qiita.com/rex0220/items/d0a66c133edd42ff91c4) と一対一対応 — **`cd "$(dirname "$0")"` が `%~dp0` の代役**。cron は cwd がホームなので必須
-- 失敗・通知・復旧（`--resume`）は [#7](https://qiita.com/rex0220/items/39821af2a79b88de0ed2)・[#8](https://qiita.com/rex0220/items/30cac8d8b52ec8ac782a) のまま動く — **スケジューラを変えても運用設計は変わらない**
+- 失敗・通知・復旧（`--resume`）は [#7](https://qiita.com/rex0220/items/39821af2a79b88de0ed2)・[#8](https://qiita.com/rex0220/items/30cac8d8b52ec8ac782a) のまま動く — **スケジューラを変えても運用設計は変わらない**。ただし**復旧の「手間」は変わる** — [#6](https://qiita.com/rex0220/items/a522f7880a5960f033b3) のブラウザのボタンに対し、VPS は **SSH 鍵を持った端末が必要**。出先で直せるかは事前に決めておく
 - **定期実行は VPS・PR 検証は Actions** の組み合わせが可能。書込トークンを GitHub に置かずに済む
 - **セキュリティパッチは自動で入るが、再起動は手動が既定** — 実機でも 42 分で「要再起動」（新カーネル + libc6）が溜まった。バッチサーバーは停止可能な時間帯が明確なので、**実行時刻を避けた自動再起動**が現実的
 - ただし**月 1,064 円は総コストではない** — OS 保守・鍵管理・手順書の維持という工数が乗る。しかも**安定して動くほど、いざという時の対応工数は増える**（手順を忘れ、担当が替わり、手順書が腐るため）。時刻が多少ずれてよいなら、長期の総コストでは [#6](https://qiita.com/rex0220/items/a522f7880a5960f033b3) が勝ちます
