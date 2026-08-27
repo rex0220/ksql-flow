@@ -143,7 +143,7 @@
 | 6 | ② GitHub Actions（#6） | **公開済み 2026-08-27**: https://qiita.com/rex0220/items/a522f7880a5960f033b3（PR 差分自動コメントが主役。実機検証 5 項目 + schedule 遅延実測 3 点 + 過去記事 +99 分の引用。ChatGPT 9.7/批判的評価消化済み。ドラフト: qiita_draft_06_github_actions.md） |
 | 7 | ⑤-a 深掘り: エラー対応とリラン（#7） | **公開済み 2026-08-27**: https://qiita.com/rex0220/items/39821af2a79b88de0ed2（実機ドリル 8 シナリオ・ChatGPT 9.95 消化） |
 | 8 | ⑤-b 深掘り: 失敗の 4 クラスと AI 診断（#8） | **公開済み 2026-08-27**: https://qiita.com/rex0220/items/30cac8d8b52ec8ac782a（A〜D 分類・AI トリアージ実演・診る AI/押す人間/拾う機械。ChatGPT 9.9 / Gemini 公開可） |
-| 9 | ④'' VPS + cron（#9） | **ドラフト完成（2026-08-27）** — ConoHa VPS 実機検証済み（cron 遅延 1 秒・罠 5 つ・失敗/resume 再現）。`qiita_draft_09_vps_cron.md`。cron/Docker 単独編は廃し、Docker は GCP 編へ吸収 |
+| 9 | ④'' VPS + cron（#9） | **公開済み 2026-08-27**: https://qiita.com/rex0220/items/dd8ec668b8966e346d48（ConoHa VPS 実機構築を Claude が全実施・cron 遅延 +1 秒の実測・罠 5 つ・保守工数/パッチ/再起動の設計・AI と人間の境界。ChatGPT 9.9 / Gemini 公開可。cron/Docker 単独編は廃し、Docker は GCP 編へ吸収） |
 | - | ④'' 共有レンタルサーバー編 | **見送り** — さくら等は FreeBSD で Node 公式バイナリ無し・Docker 不可・国外 IP フィルターで GitHub 遮断。#9 内で 1 段落触れるに留める |
 | 11 | ④'-b GCP 編 | examples の Cloud Run Jobs 例を追加してから。共通設計論もこの記事が持つ |
 | - | ④'-a AWS 編 / ④'-c Azure 編 | **見送り（2026-08-24）** — AWS はアカウント利用不能で実機検証不可・Azure は絞り込みで温存 |

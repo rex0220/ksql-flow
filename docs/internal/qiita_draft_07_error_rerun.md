@@ -189,4 +189,5 @@ ksql-flow unlock --profile prod   # 対象一覧を表示してから解除
 6. **#6**: [GitHub Actions で kintone バッチをサーバーレス運用 — PR を開くと「書込差分」が自動で貼られる](https://qiita.com/rex0220/items/a522f7880a5960f033b3)
 7. **#7（本記事）**: kintone バッチが失敗した朝にやること
 8. **#8**: [バッチの失敗は 4 種類ある — 自動リラン・AI 診断・人間の判断の切り分け](https://qiita.com/rex0220/items/30cac8d8b52ec8ac782a)
-9. 以降、cron・Docker / レンタルサーバー / Google Cloud の環境別と、設計深掘りの続き（分散ロックの内部・全文検索索引の書込ラグ実測）を予定
+9. **#9**: [月 1,000 円の VPS で kintone バッチを毎朝動かす — cron の遅延は 1 秒だった](https://qiita.com/rex0220/items/dd8ec668b8966e346d48)
+10. 以降、Google Cloud（Cloud Run Jobs）と、設計深掘りの続き（分散ロックの内部・全文検索索引の書込ラグ実測）を予定
