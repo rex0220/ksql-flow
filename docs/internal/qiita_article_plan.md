@@ -142,7 +142,7 @@
 | 5 | ⑩ API 削減実測編（#5） | **公開済み 2026-08-25**: https://qiita.com/rex0220/items/9cbc1e0e9b5ab292e6a1（ChatGPT 9.7 消化済み。F-5 A/B・F-7 native upsert・ロールバック仮説） |
 | 6 | ② GitHub Actions（#6） | **公開済み 2026-08-27**: https://qiita.com/rex0220/items/a522f7880a5960f033b3（PR 差分自動コメントが主役。実機検証 5 項目 + schedule 遅延実測 3 点 + 過去記事 +99 分の引用。ChatGPT 9.7/批判的評価消化済み。ドラフト: qiita_draft_06_github_actions.md） |
 | 7 | ⑤-a 深掘り: エラー対応とリラン（#7） | **公開済み 2026-08-27**: https://qiita.com/rex0220/items/39821af2a79b88de0ed2（実機ドリル 8 シナリオ・ChatGPT 9.95 消化） |
-| 8 | ⑤-b 深掘り: 失敗の 4 クラスと AI 診断（#8） | **ドラフト完成（2026-08-27）** — A〜D 分類・自動リランはルール(A のみ)・AI トリアージ実演(閲覧のみ)・診る AI/押す人間/拾う機械。`qiita_draft_08_failure_classes.md` |
+| 8 | ⑤-b 深掘り: 失敗の 4 クラスと AI 診断（#8） | **公開済み 2026-08-27**: https://qiita.com/rex0220/items/30cac8d8b52ec8ac782a（A〜D 分類・AI トリアージ実演・診る AI/押す人間/拾う機械。ChatGPT 9.9 / Gemini 公開可） |
 | 9 | ④ cron / Docker | 深掘り後。#7/#8 へのリンクで運用節を薄くできる |
 | 10 | ④'' レンタルサーバー cron 編 | 契約中のサーバーで実機検証してから。「既存資産に載せる」訴求の第 2 弾 |
 | 11 | ④'-b GCP 編 | examples の Cloud Run Jobs 例を追加してから。共通設計論もこの記事が持つ |

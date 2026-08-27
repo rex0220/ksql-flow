@@ -289,4 +289,5 @@ Webhook は「ログアプリに書けないほどの失敗でも飛ぶ」「hea
 5. **#5**: [kintone バッチの API 消費を 4 割減らすまで — 「束ねれば速い」が実測で覆った話](https://qiita.com/rex0220/items/9cbc1e0e9b5ab292e6a1)
 6. **#6**: [GitHub Actions で kintone バッチをサーバーレス運用 — PR を開くと「書込差分」が自動で貼られる](https://qiita.com/rex0220/items/a522f7880a5960f033b3)
 7. **#7**: [kintone バッチが失敗した朝にやること — Exit Code・部分適用・再実行しても壊れない設計](https://qiita.com/rex0220/items/39821af2a79b88de0ed2)
-8. 以降、cron・Docker / レンタルサーバー / Google Cloud の環境別と、設計深掘りの続きを予定
+8. **#8**: [バッチの失敗は 4 種類ある — 自動リラン・AI 診断・人間の判断の切り分け](https://qiita.com/rex0220/items/30cac8d8b52ec8ac782a)
+9. 以降、cron・Docker / レンタルサーバー / Google Cloud の環境別と、設計深掘りの続きを予定

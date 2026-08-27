@@ -137,4 +137,5 @@ XL ジョブの内訳に直すとこうなります。
 5. **#5（本記事）**: kintone バッチの API 消費を 4 割減らすまで
 6. **#6**: [GitHub Actions で kintone バッチをサーバーレス運用 — PR を開くと「書込差分」が自動で貼られる](https://qiita.com/rex0220/items/a522f7880a5960f033b3)
 7. **#7**: [kintone バッチが失敗した朝にやること — Exit Code・部分適用・再実行しても壊れない設計](https://qiita.com/rex0220/items/39821af2a79b88de0ed2)
-8. 以降、cron・Docker / レンタルサーバー / Google Cloud の環境別と、設計深掘りの続きを予定
+8. **#8**: [バッチの失敗は 4 種類ある — 自動リラン・AI 診断・人間の判断の切り分け](https://qiita.com/rex0220/items/30cac8d8b52ec8ac782a)
+9. 以降、cron・Docker / レンタルサーバー / Google Cloud の環境別と、設計深掘りの続きを予定
