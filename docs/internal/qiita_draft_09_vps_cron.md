@@ -1,6 +1,4 @@
-
-
-> **root 運用について**: 本記事は検証を単純化するため root で構築しています（ConoHa の公式手順も root 接続を案内しています）。長期運用では**バッチ専用ユーザーを作り、リポジトリ・`.env`・cron の所有権をそのユーザーに分離する**構成も検討してください — [#4](https://qiita.com/rex0220/items/d0a66c133edd42ff91c4) で Windows 側について書いた「専用アカウントで動かす」と同じ考え方です。<!--
+<!--
 title: 【kSQL Flow #9】月 1,000 円の VPS で kintone バッチを毎朝動かす — cron の遅延は 1 秒だった
 tags:
   - kintone
@@ -77,6 +75,8 @@ apt-get install -y nodejs
 node -v   # v22.23.2
 ```
 
+（kSQL Flow の要件は **Node.js 20.6 以上**です。ここでは検証済みの LTS として 22 系を選んでいます）
+
 これが**作成直後には失敗します**:
 
 ```
@@ -121,6 +121,8 @@ chmod 600 .env
 node --env-file=.env node_modules/@rex0220/ksql-flow/dist/cli.js validate --check-logapp --profile prod
 #   → OK: ログアプリ (ID ...) は 8.2 のフィールド定義を満たしています
 ```
+
+> **root 運用について**: 本記事は検証を単純化するため root で構築しています（ConoHa の公式手順も root 接続を案内しています）。長期運用では**バッチ専用ユーザーを作り、リポジトリ・`.env`・cron の所有権をそのユーザーに分離する**構成も検討してください — [#4](https://qiita.com/rex0220/items/d0a66c133edd42ff91c4) で Windows 側について書いた「専用アカウントで動かす」と同じ考え方です。
 
 ## 起動スクリプトは Windows 版と同じ思想
 
