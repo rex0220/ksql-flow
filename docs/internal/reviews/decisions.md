@@ -144,3 +144,16 @@
 追加フィールドは 8 → **9** になる（ログアプリは 23 → 32 フィールド）。
 
 反映: `rerun_trigger_design.md` v6 §4.3・§4.4・§4.6・§4.10。
+
+### Q11 追補 3（2026-08-27・`rerun_state` の値体系）
+
+**`rerun_state` の選択肢は、日本語ではなく大文字 ASCII の識別子とする。**
+
+- 同一アプリ内で `status` が `SUCCESS` / `NO_DATA` / `FAILED` / `ABORTED` / `SKIPPED` / `RUNNING` / `TIMEOUT`、`record_type` が `BATCH` / `JOB` である以上、`rerun_state` だけ日本語では体系が割れる。
+- クエリ・ログ・スクリプトでの扱いも識別子のほうが安全。表示上の分かりやすさはフィールドラベルと一覧の設定で担保する。
+- 値: `REQUESTED`（人間が設定）/ `CLAIMED` / `SUCCESS` / `FAILED` / `UNKNOWN` / `EXPIRED` / `CANCELED`。既定は**未選択**。
+- `SUCCESS` / `FAILED` は `status` と同じ語を意図的に再利用する（意味も一致する）。実行中は `status` の `RUNNING` と紛れるため **`CLAIMED`** とし、`rerun_claimed_host` / `rerun_claim_expires_at` と語を揃えた。
+
+あわせて、追加フィールドは既存と同じく**フィールドコードは小文字スネークケース・ラベルは日本語**とする（`status` / ステータス、`batch_id` / バッチ実行ID と同じ）。
+
+反映: `rerun_trigger_design.md` v6 §4.3・§4.3.1 および状態を参照する全節。
