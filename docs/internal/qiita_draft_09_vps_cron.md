@@ -214,11 +214,12 @@ npm 側の依存はリポジトリ内（`node_modules`）に閉じており、�
 #!/bin/sh
 # 配置先に依存しないよう、スクリプト自身のディレクトリへ移動する（.bat の %~dp0 と同じ思想）
 cd "$(dirname "$0")" || exit 1
-exec node --env-file=.env node_modules/@rex0220/ksql-flow/dist/cli.js run-all ./jobs --profile prod
+exec node --env-file=.env node_modules/@rex0220/ksql-flow/dist/cli.js run-all ./jobs --profile prod "$@"
 ```
 
 - **`cd "$(dirname "$0")"`** = `.bat` の `cd /d %~dp0`。**cron はカレントディレクトリがホーム**になるので、これが無いと `.env` も `jobs/` も見つかりません
 - **`exec node ...`** で node を直接起動 = Exit Code をそのまま cron へ返す（`npm run` を挟まない理由も #4 と同じ）
+- **`"$@"` で引数を素通し** — cron からは引数なしで、復旧時は `./run_batch.sh --resume` で呼べます（後述）
 - **自動再起動は設定しない**。復旧は [#7](https://qiita.com/rex0220/items/39821af2a79b88de0ed2) の `--resume` に一本化
 
 別ディレクトリから実行して、正しく動くことを確認します:
@@ -489,6 +490,52 @@ kintone のログアプリに記録され、条件通知も飛びます（[#4 �
 ```
 
 **失敗時の as-of を引き継いで、失敗したジョブと巻き添えでスキップされたジョブの両方が再実行**されました。#7 で Windows 上・開発機上で確認したのと同じ挙動です。
+
+### リランの手間は環境ごとに違う — ここが VPS の弱点
+
+[#7](https://qiita.com/rex0220/items/39821af2a79b88de0ed2) で「復旧は `--resume` に一本化」と書きましたが、それは**コマンドの話**です。**実際に打つまでの手間は環境ごとに大きく違います**。
+
+| | 復旧操作 | 出先から | 必要な前提 |
+| --- | --- | --- | --- |
+| [#6](https://qiita.com/rex0220/items/a522f7880a5960f033b3) GitHub Actions | **ブラウザで「Run workflow」+ resume チェック** | **できる**（スマホでも） | GitHub にログインできること |
+| [#4](https://qiita.com/rex0220/items/d0a66c133edd42ff91c4) Windows サーバー | RDP か手元から実行 | 社内 NW / VPN が要る | サーバーへの到達 |
+| **#9 VPS** | **SSH で入って 1 コマンド** | SSH クライアントと**秘密鍵**が要る | 鍵を持つ端末 |
+
+VPS の復旧はこれだけです:
+
+```bash
+ssh -i <鍵> root@<VPS>
+cd /opt/ksql/my-ksql-jobs && ./run_batch.sh --resume    # ※後述の理由でこのままでは動きません
+```
+
+**ただし、本記事の `run_batch.sh` は引数を受け取りません**（`run-all ./jobs --profile prod` を固定で実行します）。resume したいときは直接叩くことになります:
+
+```bash
+cd /opt/ksql/my-ksql-jobs
+node --env-file=.env node_modules/@rex0220/ksql-flow/dist/cli.js run-all ./jobs --profile prod --resume
+```
+
+毎回これを打つのは辛いので、**引数を素通しする形にしておく**ほうが実用的です:
+
+```sh
+#!/bin/sh
+cd "$(dirname "$0")" || exit 1
+exec node --env-file=.env node_modules/@rex0220/ksql-flow/dist/cli.js run-all ./jobs --profile prod "$@"
+```
+
+こうしておけば、cron からは今までどおり（引数なし）、復旧時は `./run_batch.sh --resume` で済みます。**`--as-of "2026-08-25T00:00:00+09:00"` のバックフィル**（[#8](https://qiita.com/rex0220/items/30cac8d8b52ec8ac782a) のクラス D）も同じ形で渡せます。
+
+### 出先から復旧できるか、という問題
+
+**VPS 構成の弱点はここです。** 障害通知は [#4 で組んだ kintone の条件通知](https://qiita.com/rex0220/items/d0a66c133edd42ff91c4)でスマホにも届きますが、**届いてから復旧するには SSH 鍵を持った端末が要ります**。休日や外出先で「通知は見えるが直せない」状況が起こり得ます。
+
+現実的な備えは 3 つです:
+
+1. **急がない設計にしておく** — [#8](https://qiita.com/rex0220/items/30cac8d8b52ec8ac782a) の累積・全量型なら、翌朝の実行が吸収します。**そもそも駆けつけなくてよい**のが最善の対策です
+2. **[#6](https://qiita.com/rex0220/items/a522f7880a5960f033b3) の Actions を復旧用に残しておく** — 定期実行は VPS、**手動リランのボタンだけ Actions**、という併用ができます（`workflow_dispatch` は PR 検証と同じくブラウザから叩けます）。この場合は書込可トークンを GitHub 側にも置く必要があるので、前述の「秘密の露出面が減る」利点とはトレードオフです
+3. **鍵を持つ端末を決めておく** — 前節の「決めごと」の 1 つです。**誰の・どの端末に鍵があり、その人が不在ならどうするか**まで決めておかないと、いざというとき動けません
+
+[#6](https://qiita.com/rex0220/items/a522f7880a5960f033b3) の「ブラウザのボタン 1 つ」は、時刻精度と引き換えに失うものの 1 つだと理解しておくとよいと思います。
 
 ## systemd timer という選択肢
 
