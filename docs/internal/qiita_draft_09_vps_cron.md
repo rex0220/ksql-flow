@@ -234,6 +234,78 @@ VPS は金銭コストが最安の部類ですが、**保守工数だけは自�
 
 そして**この観点で見ると、[#6](https://qiita.com/rex0220/items/a522f7880a5960f033b3) の GitHub Actions がかなり有利**です。OS 保守が無く、手順が YAML としてリポジトリに残り、実行履歴も GitHub に残る。**「時刻が多少ずれてもよい」なら、長期の総コストでは Actions が勝ちます。**
 
+## セキュリティパッチはどう当てるか — 自動更新の落とし穴
+
+「OS 保守は自分に来る」の中身で、いちばん実害が出やすいのがここです。実機で確認したところ、**Ubuntu の既定は「更新は自動・再起動は手動」**でした。
+
+```bash
+cat /etc/apt/apt.conf.d/20auto-upgrades
+#   APT::Periodic::Update-Package-Lists "1";   ← 毎日パッケージ一覧を更新
+#   APT::Periodic::Unattended-Upgrade "1";     ← 毎日セキュリティ更新を適用
+```
+
+つまり `-security` リポジトリの更新は**放っておいても毎日入ります**（今回、セットアップ中に走っていた `unattended-upgrades` がこれです）。ここまでは良い知らせです。
+
+問題は次です。セットアップから 42 分後のサーバーを見ると:
+
+```bash
+cat /var/run/reboot-required
+#   *** System restart required ***
+cat /var/run/reboot-required.pkgs
+#   libc6
+#   linux-image-6.8.0-138-generic
+#   linux-base
+
+uname -r                      # 稼働中のカーネル
+#   6.8.0-90-generic
+dpkg -l 'linux-image-*'       # ディスク上のカーネル
+#   linux-image-6.8.0-138-generic  ← 新しいものが入っている
+```
+
+**新しいカーネルと libc6 は適用済みなのに、動いているのは古いカーネル**です。`Unattended-Upgrade::Automatic-Reboot` は既定で `false` なので、**誰かが再起動するまで、パッチは効いていません**。「自動更新を有効にしたから安心」がいちばん危ない誤解で、`reboot-required` が何ヶ月も放置された VPS は珍しくありません。
+
+### 運用ルールの決め方
+
+バッチサーバーは Web サーバーと違って**停止できる時間帯が明確**なので、ルールは単純にできます。
+
+**方針 A: 自動再起動（バッチの実行時刻を避けて）**
+
+```bash
+# /etc/apt/apt.conf.d/50unattended-upgrades
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-WithUsers "true";
+Unattended-Upgrade::Automatic-Reboot-Time "04:00";   # バッチ 6:07 の 2 時間前
+```
+
+バッチの時刻から十分離せば、実行中に落とされる心配はありません。**再起動が数分遅れても [#7](https://qiita.com/rex0220/items/39821af2a79b88de0ed2) の as-of 固定と冪等リランがあるので、最悪 1 回スキップされても翌朝収束します**（[#8](https://qiita.com/rex0220/items/30cac8d8b52ec8ac782a) のクラス D と同じ構造です）。手離れを優先するならこれが最適解です。
+
+**方針 B: 手動再起動（月次などの点検日に）**
+
+```bash
+# 月次点検で確認する 3 行
+ls /var/run/reboot-required 2>/dev/null && echo "再起動が必要です"
+cat /var/run/reboot-required.pkgs 2>/dev/null    # 何が待っているか
+uname -r; dpkg -l 'linux-image-*' | grep ^ii     # 稼働 vs 導入済みカーネル
+```
+
+止めるタイミングを自分で握りたい場合はこちら。ただし**「点検日を守る」という人間の工数が毎月かかります** — 前節で書いた「安定するほど忘れる」がそのまま効いてきます。
+
+**方針 C: Livepatch（再起動なしでカーネルパッチ）**
+
+Ubuntu Pro（個人・小規模なら無料枠あり）を有効にすると、`livepatch` でカーネルの再起動を先送りできます。今回の VPS でも `pro status` に `esm-infra` / `esm-apps` が利用可能と出ていました。ただし**再起動が完全に不要になるわけではなく**（libc6 の更新などは結局再起動が要ります）、管理対象が 1 台増えるとも言えます。
+
+### バッチサーバーとしての推奨
+
+私は **方針 A（時刻をずらした自動再起動）+ 月次の目視確認**を勧めます。理由は 3 つ:
+
+1. バッチは**停止可能な時間帯がはっきりしている** — Web サービスと違い、深夜の数分停止のコストがほぼゼロ
+2. **冪等リランがあるので、再起動と実行がぶつかっても壊れない** — [#7](https://qiita.com/rex0220/items/39821af2a79b88de0ed2) の設計がここで効きます
+3. **人の記憶に依存しない** — 前節の「安定するほど手順を忘れる」問題に対して、いちばん強い対策が自動化です
+
+そのうえで、月に 1 度でいいので `ls /var/run/reboot-required` を見る習慣をつけてください（[#4 の heartbeat](https://qiita.com/rex0220/items/d0a66c133edd42ff91c4) と同じで、**自動化しても「効いているか」の確認だけは人間に残ります**）。
+
+なお [#6](https://qiita.com/rex0220/items/a522f7880a5960f033b3) の GitHub Actions では、**この節の話が丸ごと存在しません** — 実行環境は毎回新品の使い捨てで、パッチも再起動も GitHub 側の仕事です。前節のコスト比較で「長期の総コストでは Actions が勝つ」と書いた最大の理由がこれです。
+
 ## 失敗と復旧も同じように動く
 
 環境が変わっても運用装備は変わらない、というのが連載の主張です。VPS 上でも [#7](https://qiita.com/rex0220/items/39821af2a79b88de0ed2)・[#8](https://qiita.com/rex0220/items/30cac8d8b52ec8ac782a) の仕組みがそのまま動くことを確認しました。
@@ -319,6 +391,7 @@ systemctl list-timers ksql-batch.timer   # 次回実行時刻の確認
 - 起動スクリプトは [#4 の `.bat`](https://qiita.com/rex0220/items/d0a66c133edd42ff91c4) と一対一対応 — **`cd "$(dirname "$0")"` が `%~dp0` の代役**。cron は cwd がホームなので必須
 - 失敗・通知・復旧（`--resume`）は [#7](https://qiita.com/rex0220/items/39821af2a79b88de0ed2)・[#8](https://qiita.com/rex0220/items/30cac8d8b52ec8ac782a) のまま動く — **スケジューラを変えても運用設計は変わらない**
 - **定期実行は VPS・PR 検証は Actions** の組み合わせが可能。書込トークンを GitHub に置かずに済む
+- **セキュリティパッチは自動で入るが、再起動は手動が既定** — 実機でも 42 分で「要再起動」（新カーネル + libc6）が溜まった。バッチサーバーは停止可能な時間帯が明確なので、**実行時刻を避けた自動再起動**が現実的
 - ただし**月 1,064 円は総コストではない** — OS 保守・鍵管理・手順書の維持という工数が乗る。しかも**安定して動くほど、いざという時の対応工数は増える**（手順を忘れ、担当が替わり、手順書が腐るため）。時刻が多少ずれてよいなら、長期の総コストでは [#6](https://qiita.com/rex0220/items/a522f7880a5960f033b3) が勝ちます
 - 罠は 5 つ。特に **`gh auth setup-git` 忘れ**は、運用開始後の最初の `git pull` で初めて牙をむく
 
