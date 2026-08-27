@@ -132,18 +132,21 @@ node --env-file=.env node_modules/@rex0220/ksql-flow/dist/cli.js validate --chec
 | --- | --- | --- | --- |
 | **今回導入** | nodejs（NodeSource） | 22.23.2 | kSQL Flow の実行環境（要件は 20.6 以上） |
 | **今回導入** | gh（GitHub CLI） | 2.98.0 | private リポジトリの clone と git 認証 |
-| イメージ同梱 | git | 2.43.0 | ジョブの更新（Already up to date.） |
+| イメージ同梱 | git | 2.43.0 | ジョブの更新（`git pull`） |
 | イメージ同梱 | cron | 3.0pl1 | 定期実行 |
 | イメージ同梱 | **fail2ban** | 1.0.2 | SSH 総当たりの遮断（**有効**・前述の BAN の犯人） |
 | イメージ同梱 | **ufw** | 0.36.2 | ファイアウォール（**有効**） |
 | イメージ同梱 | unattended-upgrades | 2.9.1 | 自動セキュリティ更新（**作成直後の apt ロックの原因**） |
 | イメージ同梱 | curl / wget / openssh-server | — | 取得・接続の基本ツール |
 
-npm 側の依存はリポジトリ内（）に閉じており、グローバルインストールはありません:
+npm 側の依存はリポジトリ内（`node_modules`）に閉じており、グローバルインストールはありません:
 
+```
+@rex0220/ksql-flow          ^0.4.0   ← ランナー本体
+@rex0220/kintone-sql-tools  ^3.72.0  ← SQL エンジン
+```
 
-
-**ディスクは 13MB**（リポジトリ + node_modules）、OS 全体でも 5.6GB/99GB。**メモリは OS 全体で 357〜379MB**（ の used）で、1GB プランに十分収まります。Docker も Web サーバーも要りません — **cron から node を叩くだけの構成**です。
+**ディスクは 13MB**（リポジトリ + node_modules）、OS 全体でも 5.6GB/99GB。**メモリは OS 全体で 357〜379MB**（`free -m` の used）で、1GB プランに十分収まります。Docker も Web サーバーも要りません — **cron から node を叩くだけの構成**です。
 
 ## 起動スクリプトは Windows 版と同じ思想
 
