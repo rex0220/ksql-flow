@@ -146,7 +146,7 @@
 | 9 | ④'' VPS + cron（#9） | **公開済み 2026-08-27**: https://qiita.com/rex0220/items/dd8ec668b8966e346d48（ConoHa VPS 実機構築を Claude が全実施・cron 遅延 +1 秒の実測・罠 5 つ・保守工数/パッチ/再起動の設計・AI と人間の境界。ChatGPT 9.9 / Gemini 公開可。cron/Docker 単独編は廃し、Docker は GCP 編へ吸収） |
 | - | ④'' 共有レンタルサーバー編 | **見送り** — さくら等は FreeBSD で Node 公式バイナリ無し・Docker 不可・国外 IP フィルターで GitHub 遮断。#9 内で 1 段落触れるに留める |
 | 10 | リラン指示ポーラー編（#10） | **公開済み 2026-08-28**: https://qiita.com/rex0220/items/b841921afe86083f14a0（チェック 1 つで VPS リラン・ポート 0 開放・チェックボックス分離・リマインダー停止検知・実機罠 3 つ・実測 4 分。ChatGPT 9.9 消化） |
-| 11 | 分散ロック深掘り（#11） | **ドラフト完成（2026-08-28）** — 重複禁止 INSERT = 原子的 check-and-set・二層ロック・job_key ライフサイクル・実測 3 本(#3/#7/#10)・B175 索引ラグ引用(許諾 4 条件遵守)・排他 vs 楽観の対比。`qiita_draft_11_distributed_lock.md` |
+| 11 | 分散ロック深掘り（#11） | **公開済み 2026-08-28**: https://qiita.com/rex0220/items/44cf9f6d23c264d14dca（重複禁止 INSERT = create-if-absent・リースとしての保証範囲/残余リスク/復旧手順・二層ロック(cwd 単位)・job_key ライフサイクル・実測 3 本(#3/#7/#10)+同時 INSERT 未実測の明記・B175 索引ラグ引用(許諾 4 条件遵守)・KLIKE 規約 2 行。ChatGPT 9.8 / Codex GO 消化済み） |
 | 12 | ④'-b GCP 編 | examples の Cloud Run Jobs 例を追加してから。共通設計論もこの記事が持つ |
 | - | ④'-a AWS 編 / ④'-c Azure 編 | **見送り（2026-08-24）** — AWS はアカウント利用不能で実機検証不可・Azure は絞り込みで温存 |
 | 10 | ⑤ 設計深掘り | ネタ在庫として温存・反応を見て |
