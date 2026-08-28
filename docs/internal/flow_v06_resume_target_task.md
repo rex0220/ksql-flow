@@ -14,7 +14,9 @@
 ### F-A: `--resume-batch <batch_id>`（再開対象の明示指定）
 
 - `run-all` に新フラグ `--resume-batch <batch_id>` を追加する。指定された `batch_id` の BATCH レコードを再開元とし、`--resume` と同じ選抜・as-of 引き継ぎロジックを適用する
-- 検証（fail-closed・Exit 1）: 指定 batch_id の BATCH レコードが存在しない / profile が実行時 profile と不一致 / `--resume` と `--resume-batch` の併用
+- 検証（fail-closed・Exit 1）: 指定 batch_id の BATCH レコードが **0 件または複数件** / profile が実行時 profile と不一致 / `--resume` と `--resume-batch` の併用
+- **ログアプリ必須（レビュー指摘反映）**: `--resume-batch` は再開元の解決にログアプリのみを使う。既存 `--resume` が持つ profile 別 state（state.json）へのフォールバックは**適用しない** — 明示指定した対象と無関係なローカル state を再開する危険があるため。ログアプリの GET 失敗・不正応答はフォールバックせず fail-closed（既存の Exit 体系に従い、ログアプリ到達不能系の Exit Code）
+- JOB レコードの取得は指定 BATCH 配下（parent_batch_id 一致）のみ
 - 指定バッチの全ジョブが SUCCESS 済みの場合の挙動は既存 `--resume` と同一（「再実行が必要なジョブはありません」Exit 0）でよい — 対象が明示されていれば誤 SUCCESS ではなく正しい報告になる
 - 既存 `--resume`（最新バッチ）の挙動は不変更（後方互換）
 
@@ -33,7 +35,8 @@
 ## 受入基準
 
 - [ ] `--resume-batch` で指定バッチのみが再開対象になる（より新しい BATCH が存在しても影響しない）ことのテスト
-- [ ] batch_id 不存在・profile 不一致・`--resume` 併用が Exit 1
+- [ ] batch_id 0 件・複数件・profile 不一致・`--resume` 併用が Exit 1
+- [ ] ログアプリ GET 失敗時に state.json へフォールバックせず fail-closed になる
 - [ ] `KSQL_HOST_LABEL` 設定時: ログアプリ host にラベル・ロックファイル host に実ホスト名が記録されることのテスト
 - [ ] ラベル設定下でも同一ホスト生存判定（lock.ts）が実ホスト名で機能する
 - [ ] 既存テスト全 green・`--resume` の挙動不変更
