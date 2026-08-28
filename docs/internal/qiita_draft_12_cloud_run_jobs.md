@@ -69,11 +69,18 @@ gcloud builds submit \
 
 誤解しやすいので明記しておきます。**ビルドが走るのはジョブの中身を変えたときだけ**で、毎朝の定期実行のたびにビルドされるわけではありません。
 
-```text
-[コード変更時だけ]  gcloud builds submit → イメージを Artifact Registry へ保管
-[毎朝 6:00]        Scheduler 発火 → 保管済みイメージからコンテナを起動
-                   → バッチ実行（35 秒）→ コンテナ破棄（インメモリ FS ごと消える）
-                   → イメージは残り、翌朝また同じものから起動
+```mermaid
+flowchart TB
+    subgraph DEV["コード変更時だけ（1 回）"]
+        BUILD["gcloud builds submit<br>（Cloud Build でビルド）"] --> AR["Artifact Registry<br>イメージを保管"]
+    end
+    subgraph DAILY["毎朝 6:00（繰り返し）"]
+        SCHED["Scheduler 発火"] --> RUN["保管済みイメージから<br>コンテナを起動"]
+        RUN --> EXEC["バッチ実行（35 秒）"]
+        EXEC --> GONE["コンテナ破棄<br>（インメモリ FS ごと消える）"]
+    end
+    AR -->|"何度でも使い回し"| RUN
+    GONE -.->|"翌朝また同じイメージから"| SCHED
 ```
 
 使い捨てなのは**コンテナ（実行インスタンス）だけ**で、イメージは何度でも使い回されます。毎朝の 35 秒にビルドの 45 秒は含まれません。実行の履歴とログもコンソールに残ります — 消えるのはコンテナ内のローカルファイルだけです（実測 2 で見るとおり）。
