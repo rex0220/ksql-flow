@@ -79,6 +79,25 @@ gcloud builds submit \n  --tag asia-northeast1-docker.pkg.dev/PROJECT_ID/ksql/ks
 
 逆方向の罠もあります。**ジョブはイメージのダイジェスト（実体）を固定して覚える**ため、`:latest` タグ運用でも、再ビルドしただけでは翌朝の実行に反映されません。「ジョブ SQL を直したのに動きが変わらない」ときの定番原因で、再ビルド後は `gcloud run jobs update --image ...` でジョブ側の参照を更新します。
 
+Docker を使ったことがある人向けに対応関係をまとめると、こうなります。**「build → push → run」という Docker の流れそのものを、全部マネージドに置き換えた**構図です（手元にデーモンがないだけ）:
+
+| 手元の Docker | 今回の GCP 側 |
+| --- | --- |
+| `docker build` | Cloud Build（`gcloud builds submit`） |
+| Docker Hub 等のレジストリへ push | Artifact Registry |
+| `docker run` | Cloud Run Jobs の実行（Execution） |
+
+### ジョブを変更したいときの流れ
+
+日々の変更はどう反映するのか。開発の入り口はこれまでの回と何も変わりません。
+
+1. **ローカルで**ジョブ SQL・設定を変更し、`validate` と `--dry-run` で確認（[#1](https://qiita.com/rex0220/items/893ab4016a5aaf595642) からの手順のまま）
+2. **Git で PR → レビュー → マージ**（[#6](https://qiita.com/rex0220/items/a522f7880a5960f033b3) の GitHub Actions を入れていれば、PR に書込差分が自動で貼られる）
+3. マージ後、**反映の 2 コマンド**: `gcloud builds submit ...`（再ビルド）→ `gcloud run jobs update --image ...`（ジョブの参照更新）
+4. 翌朝の定期実行から新しいイメージで動く
+
+今回の検証では 3 を手動で叩きましたが、中身はコマンド 2 つなので、#6 と同じ要領で「main へのマージを起点に CI から自動実行」へ寄せられます。**SQL を書く・確認する・PR する、という日常はローカルのまま** — クラウドに行くのはマージ後の成果物だけです。
+
 設定の要点は 3 つだけ:
 
 ```bash
