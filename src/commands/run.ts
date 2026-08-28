@@ -2,6 +2,7 @@ import { appIdMap, ResolvedProfile } from "../config";
 import { ApiLimitError, errorMessage, LockedError, LockUnavailableError } from "../errors";
 import { runJob } from "../executor";
 import { loadJobFile } from "../jobs";
+import { buildJobKey } from "../jobkey";
 import { LocalLock } from "../lock";
 import { notifyFailure, notifyHeartbeat } from "../notify";
 import { createRunnerEnv, effectiveTimeoutMs, parseAsOf } from "../runner";
@@ -41,9 +42,11 @@ export async function runCommand(
   const out = env.out;
 
   let job;
+  let jobKey: string;
   let asOf: Date;
   try {
     job = loadJobFile(filePath, appIdMap(profile));
+    jobKey = buildJobKey(profile.name, job.name);
     asOf = parseAsOf(options.asOf);
   } catch (error) {
     out(`エラー: ${errorMessage(error)}`);
@@ -107,7 +110,7 @@ export async function runCommand(
       asOf,
       batchId: env.batchId,
       timeoutMs: effectiveTimeoutMs(job.timeoutSec, batchDeadline),
-      jobKey: `${profile.name}:${job.name}`,
+      jobKey,
     });
   } catch (error) {
     if (error instanceof LockedError) {

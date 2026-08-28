@@ -3,6 +3,7 @@ import { appIdMap, ResolvedProfile } from "../config";
 import { ApiLimitError, ConfigError, errorMessage, LockedError, LockUnavailableError } from "../errors";
 import { resolveGitRef, runJob, RUNNER_VERSION } from "../executor";
 import { JobFile, loadJobDir, validateDependencyGraph } from "../jobs";
+import { buildBatchJobKey, buildJobKey } from "../jobkey";
 import { LocalLock } from "../lock";
 import { toKintoneDateTime, truncateDetail } from "../logapp";
 import { batchNotifyPayload, notifyFailure, notifyHeartbeat } from "../notify";
@@ -60,9 +61,13 @@ export async function runAllCommand(
   const out = env.out;
 
   let jobs: JobFile[];
+  let batchKey: string;
+  const jobKeys = new Map<string, string>();
   try {
     jobs = loadJobDir(dir, appIdMap(profile));
     validateDependencyGraph(jobs);
+    batchKey = buildBatchJobKey(profile.name);
+    for (const job of jobs) jobKeys.set(job.name, buildJobKey(profile.name, job.name));
   } catch (error) {
     out(`エラー: ${errorMessage(error)}`);
     return EXIT.VALIDATION;
@@ -176,7 +181,6 @@ export async function runAllCommand(
   }
 
   const startedAt = new Date();
-  const batchKey = `${profile.name}:__batch__`;
   let batchRecordId: string | null = null;
   try {
     if (env.logApp !== null) {
@@ -292,7 +296,7 @@ export async function runAllCommand(
           batchId: env.batchId,
           parentBatchId: env.batchId,
           timeoutMs: effectiveTimeoutMs(job.timeoutSec, batchDeadline),
-          jobKey: `${profile.name}:${job.name}`,
+          jobKey: jobKeys.get(job.name)!,
         });
       } catch (error) {
         if (error instanceof LockedError) {

@@ -8,6 +8,7 @@ import { EXIT, ExitCode } from "../types";
 import { createHttpLayer, engineClientConfig, HttpLayer } from "../http";
 import { JobFile, loadJobDir, loadJobFile, MAX_STATEMENTS, validateDependencyGraph } from "../jobs";
 import { errorMessage } from "../errors";
+import { buildBatchJobKey, buildJobKey } from "../jobkey";
 
 export interface ValidateOptions {
   strict?: boolean;
@@ -39,7 +40,9 @@ export async function validateCommand(
     } else {
       jobs = loadJobDir(files.dir, apps);
       validateDependencyGraph(jobs);
+      buildBatchJobKey(profile.name);
     }
+    for (const job of jobs) buildJobKey(profile.name, job.name);
   } catch (error) {
     out(`エラー: ${errorMessage(error)}`);
     return EXIT.VALIDATION;
