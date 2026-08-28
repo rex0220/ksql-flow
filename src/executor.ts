@@ -34,6 +34,8 @@ export interface RunnerEnv {
   jsonl: JsonlLogger;
   masker: SecretMasker;
   out: (line: string) => void;
+  /** ログアプリ表示用ホスト。ローカルロックの生存判定には使用しない。 */
+  logHost: string;
   /** --lock local-only（設計書 5.5-4 の明示緩和） */
   lockLocalOnly: boolean;
 }
@@ -124,7 +126,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
     as_of: toKintoneDateTime(asOf),
     started_at: toKintoneDateTime(startedAt),
     executed_by: safeUser(),
-    host: os.hostname(),
+    host: env.logHost,
     git_ref: resolveGitRef(path.dirname(job.filePath)),
     ksql_version: `flow ${RUNNER_VERSION} / engine ${engineVersion}`,
   };

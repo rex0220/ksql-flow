@@ -9,7 +9,7 @@ describe("CLI public contract", () => {
     ["validate", ["validate", "-f", "job.sql", "--strict", "--check-logapp"]],
     ["validate-all", ["validate-all", "jobs", "--strict"]],
     ["run", ["run", "-f", "job.sql", "--dry-run", "--sample", "5", "--json"]],
-    ["run-all", ["run-all", "jobs", "--resume", "--stop-on-error"]],
+    ["run-all", ["run-all", "jobs", "--resume-batch", "batch-123", "--stop-on-error"]],
     ["unlock", ["unlock", "--profile", "prod"]],
     ["init-logapp", ["init-logapp", "--name", "実行ログ"]],
   ])("%s: 許可フラグと positional を受理する", (_command, argv) => {
@@ -29,6 +29,7 @@ describe("CLI public contract", () => {
 
   test.each([
     [["run-all", "jobs", "--resume", "--from", "02.sql"], /同時に指定/],
+    [["run-all", "jobs", "--resume", "--resume-batch", "batch-123"], /同時に指定/],
     [["run-all", "jobs", "--from", "02.sql", "--only", "03.sql"], /同時に指定/],
     [["run-all", "jobs", "--stop-on-error", "--continue-on-error"], /同時に指定/],
     [["run", "-f", "a.sql", "--file", "b.sql"], /同時に指定/],

@@ -1,6 +1,14 @@
 import * as os from "os";
 import { appIdMap, ResolvedProfile } from "../config";
-import { ApiLimitError, ConfigError, errorMessage, LockedError, LockUnavailableError } from "../errors";
+import {
+  ApiLimitError,
+  classifyRuntimeError,
+  ConfigError,
+  errorMessage,
+  LockedError,
+  LockUnavailableError,
+  LogAppResponseError,
+} from "../errors";
 import { resolveGitRef, runJob, RUNNER_VERSION } from "../executor";
 import { JobFile, loadJobDir, validateDependencyGraph } from "../jobs";
 import { buildBatchJobKey, buildJobKey } from "../jobkey";
@@ -22,6 +30,7 @@ export interface RunAllOptions {
   sample?: number;
   json?: boolean;
   resume?: boolean;
+  resumeBatch?: string;
   from?: string;
   only?: string;
   stopOnError?: boolean;
@@ -46,18 +55,34 @@ export async function runAllCommand(
   dir: string,
   options: RunAllOptions = {}
 ): Promise<ExitCode> {
+  const selectionFlags = [
+    options.resume === true ? "--resume" : null,
+    options.resumeBatch !== undefined ? "--resume-batch" : null,
+    options.from !== undefined ? "--from" : null,
+    options.only !== undefined ? "--only" : null,
+  ].filter((flag): flag is string => flag !== null);
+  if (selectionFlags.length > 1) {
+    (options.out ?? console.error)(`エラー: ${selectionFlags.join(" / ")} は同時に指定できません`);
+    return EXIT.VALIDATION;
+  }
   if (options.stopOnError === true && options.continueOnError === true) {
     console.error("エラー: --stop-on-error と --continue-on-error は同時に指定できません");
     return EXIT.VALIDATION;
   }
-  const env = createRunnerEnv(profile, {
-    maxApiCallsOverride: options.maxApiCalls,
-    lockLocalOnly: options.lockLocalOnly,
-    baseFetch: options.baseFetch,
-    out: options.out,
-    dryRun: options.dryRun,
-    json: options.json,
-  });
+  let env: RunnerEnvBundle;
+  try {
+    env = createRunnerEnv(profile, {
+      maxApiCallsOverride: options.maxApiCalls,
+      lockLocalOnly: options.lockLocalOnly,
+      baseFetch: options.baseFetch,
+      out: options.out,
+      dryRun: options.dryRun,
+      json: options.json,
+    });
+  } catch (error) {
+    (options.out ?? console.error)(`エラー: ${errorMessage(error)}`);
+    return (error as { exitCode?: ExitCode }).exitCode ?? EXIT.RUNTIME;
+  }
   const out = env.out;
 
   let jobs: JobFile[];
@@ -85,6 +110,11 @@ export async function runAllCommand(
     return EXIT.VALIDATION;
   }
 
+  if (options.resumeBatch !== undefined && env.logApp === null) {
+    out("エラー: --resume-batch には logApp の設定が必要です（state.json へのフォールバックは行いません）");
+    return EXIT.VALIDATION;
+  }
+
   if (options.dryRun !== true && env.logApp === null) {
     if (!env.lockLocalOnly) {
       out("エラー: logApp が未設定のため分散ロックを確立できません。logApp を設定するか、--lock local-only を明示してください");
@@ -108,6 +138,25 @@ export async function runAllCommand(
     if (selection.size === 0) {
       out("  --resume: 再実行が必要なジョブはありません");
       return EXIT.OK;
+    }
+  }
+
+  if (options.resumeBatch !== undefined) {
+    try {
+      const resumed = await resolveResumeBatch(env, profile, jobs, options.resumeBatch);
+      selection = resumed.selection;
+      priorSuccess = resumed.priorSuccess;
+      if (options.asOf === undefined && resumed.asOf !== null) {
+        asOf = resumed.asOf;
+        out(`  --resume-batch: 元セッションの as-of を引き継ぎます (${asOf.toISOString()})`);
+      }
+      if (selection.size === 0) {
+        out("  --resume-batch: 再実行が必要なジョブはありません");
+        return EXIT.OK;
+      }
+    } catch (error) {
+      out(`エラー: ${errorMessage(error)}`);
+      return classifyRuntimeError(error);
     }
   }
 
@@ -201,7 +250,7 @@ export async function runAllCommand(
             as_of: toKintoneDateTime(asOf),
             started_at: toKintoneDateTime(startedAt),
             executed_by: safeUser(),
-            host: os.hostname(),
+            host: env.logHost,
             git_ref: resolveGitRef(dir),
             ksql_version: `flow ${RUNNER_VERSION} / engine ${engineVersion}`,
           },
@@ -534,22 +583,7 @@ async function resolveResume(
       const latest = await env.logApp.findLatestBatch(profile.name);
       if (latest !== null) {
         const records = await env.logApp.listBatchJobs(latest.batchId);
-        const selection = new Set<string>();
-        const priorSuccess = new Set<string>();
-        const recorded = new Set<string>();
-        for (const record of records) {
-          const name = byFileName.get(record.scriptName);
-          if (name === undefined) continue;
-          recorded.add(name);
-          const filtered = record.status === "SKIPPED" && record.logDetail.startsWith("SKIPPED (filtered)");
-          if (filtered) continue;
-          if (RERUN_STATUSES.has(record.status)) selection.add(name);
-          else priorSuccess.add(name);
-        }
-        // JOB レコードが無いジョブは、クラッシュ前に未着手だったものとして再実行する。
-        for (const job of jobs) {
-          if (!recorded.has(job.name)) selection.add(job.name);
-        }
+        const { selection, priorSuccess } = selectResumeJobs(jobs, byFileName, records, RERUN_STATUSES);
         return {
           selection,
           priorSuccess,
@@ -579,4 +613,69 @@ async function resolveResume(
   }
   const asOf = new Date(state.asOf);
   return { selection, priorSuccess, asOf: Number.isNaN(asOf.getTime()) ? null : asOf };
+}
+
+/** --resume-batch: 指定 BATCH だけをログアプリから解決し、ローカル state へはフォールバックしない。 */
+async function resolveResumeBatch(
+  env: RunnerEnvBundle,
+  profile: ResolvedProfile,
+  jobs: JobFile[],
+  batchId: string
+): Promise<{ selection: Set<string>; priorSuccess: Set<string>; asOf: Date | null }> {
+  if (batchId.length === 0) throw new ConfigError("--resume-batch の batch_id は空にできません");
+  if (env.logApp === null) throw new ConfigError("--resume-batch には logApp の設定が必要です");
+
+  const batches = await env.logApp.findBatchesById(batchId);
+  if (batches.length !== 1) {
+    throw new ConfigError(
+      `--resume-batch の BATCH レコードは 1 件である必要があります: batch_id=${batchId}（取得 ${batches.length} 件）`
+    );
+  }
+  const batch = batches[0];
+  if (batch.batchId !== batchId) {
+    throw new LogAppResponseError(`ログアプリから --resume-batch と異なる batch_id が返されました: ${batch.batchId}`);
+  }
+  if (batch.profile !== profile.name) {
+    throw new ConfigError(
+      `--resume-batch の profile が実行時 profile と一致しません: batch=${batch.profile}, current=${profile.name}`
+    );
+  }
+
+  const records = await env.logApp.listBatchJobs(batchId);
+  const byFileName = new Map(jobs.map((job) => [job.fileName, job.name]));
+  const rerunStatuses = new Set(["FAILED", "ABORTED", "SKIPPED", "TIMEOUT", "RUNNING"]);
+  const { selection, priorSuccess } = selectResumeJobs(jobs, byFileName, records, rerunStatuses);
+  let asOf: Date | null = null;
+  if (batch.asOf !== null) {
+    asOf = new Date(batch.asOf);
+    if (Number.isNaN(asOf.getTime())) {
+      throw new LogAppResponseError(`ログアプリの BATCH レコードに不正な as_of が記録されています: batch_id=${batchId}`);
+    }
+  }
+  return { selection, priorSuccess, asOf };
+}
+
+function selectResumeJobs(
+  jobs: JobFile[],
+  byFileName: Map<string, string>,
+  records: Array<{ scriptName: string; status: string; logDetail: string }>,
+  rerunStatuses: ReadonlySet<string>
+): { selection: Set<string>; priorSuccess: Set<string> } {
+  const selection = new Set<string>();
+  const priorSuccess = new Set<string>();
+  const recorded = new Set<string>();
+  for (const record of records) {
+    const name = byFileName.get(record.scriptName);
+    if (name === undefined) continue;
+    recorded.add(name);
+    const filtered = record.status === "SKIPPED" && record.logDetail.startsWith("SKIPPED (filtered)");
+    if (filtered) continue;
+    if (rerunStatuses.has(record.status)) selection.add(name);
+    else priorSuccess.add(name);
+  }
+  // JOB レコードが無いジョブは、クラッシュ前に未着手だったものとして再実行する。
+  for (const job of jobs) {
+    if (!recorded.has(job.name)) selection.add(job.name);
+  }
+  return { selection, priorSuccess };
 }

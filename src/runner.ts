@@ -4,6 +4,7 @@ import { ResolvedProfile } from "./config";
 import { ConfigError } from "./errors";
 import { RunnerEnv } from "./executor";
 import { createHttpLayer, engineClientConfig } from "./http";
+import { resolveLogHost } from "./host";
 import { LogAppClient } from "./logapp";
 import { JsonlLogger, PendingQueue } from "./logging/jsonl";
 import { SecretMasker } from "./logging/mask";
@@ -26,6 +27,7 @@ export interface RunnerEnvBundle extends RunnerEnv {
 /** コマンド共通のランナー環境を組み立てる（HTTP 層は単一カウンタで共有） */
 export function createRunnerEnv(profile: ResolvedProfile, options: CreateEnvOptions = {}): RunnerEnvBundle {
   const batchId = options.batchId ?? crypto.randomUUID();
+  const logHost = resolveLogHost();
   const masker = new SecretMasker(profile);
   const out = options.out ?? ((line: string) => console.log(masker.mask(line)));
   const jsonl = new JsonlLogger(profile.logging.localDir, batchId, profile.name, masker);
@@ -78,6 +80,7 @@ export function createRunnerEnv(profile: ResolvedProfile, options: CreateEnvOpti
     jsonl,
     masker,
     out,
+    logHost,
     batchId,
     pending,
     lockLocalOnly: options.lockLocalOnly ?? false,

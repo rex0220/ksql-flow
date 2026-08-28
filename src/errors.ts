@@ -28,6 +28,15 @@ export class LockUnavailableError extends Error {
   }
 }
 
+/** ログアプリの読取応答が契約を満たさない fail-closed（Exit 3） */
+export class LogAppResponseError extends Error {
+  readonly exitCode: ExitCode = EXIT.RUNTIME;
+  constructor(message: string) {
+    super(message);
+    this.name = "LogAppResponseError";
+  }
+}
+
 /** maxApiCalls 超過による安全停止（Exit 3。設計書 7.2） */
 export class ApiLimitError extends Error {
   readonly exitCode: ExitCode = EXIT.RUNTIME;
@@ -78,6 +87,7 @@ export function classifyRuntimeError(error: unknown): ExitCode {
   if (errorChainHas(error, ApiLimitError) || errorChainHas(error, HttpRetryExhaustedError)) return EXIT.RUNTIME;
   if (errorChainHas(error, DryRunMutationError)) return EXIT.RUNTIME;
   if (errorChainHas(error, LockUnavailableError)) return EXIT.RUNTIME;
+  if (errorChainHas(error, LogAppResponseError)) return EXIT.RUNTIME;
   if (errorChainHas(error, LockedError)) return EXIT.LOCKED;
   if (errorChainHas(error, ConfigError)) return EXIT.VALIDATION;
   if (findHttpStatus(error) !== undefined) return EXIT.RUNTIME;

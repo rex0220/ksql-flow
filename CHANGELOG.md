@@ -2,6 +2,12 @@
 
 このプロジェクトの主な変更を記録します。
 
+## [0.6.0] - 2026-08-28
+
+- `run-all --resume-batch <batch_id>` を追加。指定 BATCH だけを再開元にし、元の as-of と失敗・未着手ジョブ選抜を引き継ぎます。BATCH の 0 件／複数件、profile 不一致、選抜フラグ併用は Exit 1。ログアプリ取得失敗時は `state.json` へフォールバックせず Exit 3 で fail-closed します。
+- 環境変数 `KSQL_HOST_LABEL` を追加。1〜64 文字の `[A-Za-z0-9._:-]` をログアプリの BATCH / JOB `host` に記録し、不正値は API 呼び出し前に Exit 1。ローカルロックの host 記録・同一ホスト生存判定は従来どおり `os.hostname()` を使用します。
+- 公開仕様書 §6 / §8.2 / §10.1 と CLI usage を更新し、対象指定再開、state フォールバック禁止、host ラベルの用途と制約を明文化しました。
+
 ## [0.5.0] - 2026-08-28
 
 - **`job_key` の入力ガードを追加**（170 tests green）。ジョブ名 `__batch__`、プロファイル名／ジョブ名に `:` を含む設定、完成した `{profile}:{name}` が 65 UTF-16 コード単位以上になる設定は、`validate` / `run` / `run-all` で API 呼び出し前に Exit 1 となります。
@@ -52,6 +58,7 @@
 - `--check-logapp` の選択肢集合検査、template 契約テスト、Node 18 / npm pack install smoke CI、unlock 対象一覧表示を追加。
 - clientCert / proxy と validate の推定 API 消費・所要時間表示を v0.1 非対応として明記。
 
+[0.6.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.6.0
 [0.5.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.5.0
 [0.4.1]: https://github.com/rex0220/ksql-flow/releases/tag/v0.4.1
 [0.4.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.4.0

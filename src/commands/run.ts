@@ -5,7 +5,7 @@ import { loadJobFile } from "../jobs";
 import { buildJobKey } from "../jobkey";
 import { LocalLock } from "../lock";
 import { notifyFailure, notifyHeartbeat } from "../notify";
-import { createRunnerEnv, effectiveTimeoutMs, parseAsOf } from "../runner";
+import { createRunnerEnv, effectiveTimeoutMs, parseAsOf, RunnerEnvBundle } from "../runner";
 import { EXIT, ExitCode, JobOutcome } from "../types";
 import { dryRunJob } from "./dryrun";
 import { printRunningTargets } from "./unlock";
@@ -31,14 +31,20 @@ export async function runCommand(
   filePath: string,
   options: RunOptions = {}
 ): Promise<ExitCode> {
-  const env = createRunnerEnv(profile, {
-    maxApiCallsOverride: options.maxApiCalls,
-    lockLocalOnly: options.lockLocalOnly,
-    baseFetch: options.baseFetch,
-    out: options.out,
-    dryRun: options.dryRun,
-    json: options.json,
-  });
+  let env: RunnerEnvBundle;
+  try {
+    env = createRunnerEnv(profile, {
+      maxApiCallsOverride: options.maxApiCalls,
+      lockLocalOnly: options.lockLocalOnly,
+      baseFetch: options.baseFetch,
+      out: options.out,
+      dryRun: options.dryRun,
+      json: options.json,
+    });
+  } catch (error) {
+    (options.out ?? console.error)(`エラー: ${errorMessage(error)}`);
+    return (error as { exitCode?: ExitCode }).exitCode ?? EXIT.RUNTIME;
+  }
   const out = env.out;
 
   let job;

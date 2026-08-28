@@ -311,6 +311,20 @@ export class LogAppClient {
     };
   }
 
+  /** batch_id が一致する BATCH を列挙（--resume-batch の一意性・profile 検査用） */
+  async findBatchesById(batchId: string): Promise<Array<{ batchId: string; profile: string; asOf: string | null }>> {
+    const result = await this.client.getRecords({
+      app: this.appId,
+      query: `record_type in ("BATCH") and batch_id = "${escapeQueryValue(batchId)}" limit 2`,
+      fields: ["batch_id", "profile", "as_of"],
+    });
+    return result.records.map((record) => ({
+      batchId: String(record["batch_id"]?.value ?? ""),
+      profile: String(record["profile"]?.value ?? ""),
+      asOf: record["as_of"]?.value ? String(record["as_of"].value) : null,
+    }));
+  }
+
   /** 指定バッチ配下の JOB レコードの最終状態を取得（--resume 用） */
   async listBatchJobs(parentBatchId: string): Promise<Array<{ scriptName: string; status: string; logDetail: string }>> {
     const result = await this.client.getRecords({

@@ -23,6 +23,7 @@ const VALUE_FLAGS = new Set([
   "--as-of",
   "--from",
   "--only",
+  "--resume-batch",
   "--max-api-calls",
   "--sample",
   "--lock",
@@ -40,7 +41,7 @@ const COMMAND_FLAGS: Record<string, ReadonlySet<string>> = {
   ]),
   "run-all": new Set([
     ...COMMON_FLAGS,
-    "--as-of", "--dry-run", "--sample", "--json", "--strict", "--resume", "--from", "--only",
+    "--as-of", "--dry-run", "--sample", "--json", "--strict", "--resume", "--resume-batch", "--from", "--only",
     "--stop-on-error", "--continue-on-error", "--max-api-calls", "--lock", "--force-unlock",
   ]),
   unlock: new Set(COMMON_FLAGS),
@@ -109,7 +110,7 @@ export function validateArgs(args: ParsedArgs): void {
     );
   }
   rejectConflict(args, ["-f", "--file"]);
-  rejectConflict(args, ["--resume", "--from", "--only"]);
+  rejectConflict(args, ["--resume", "--resume-batch", "--from", "--only"]);
   rejectConflict(args, ["--stop-on-error", "--continue-on-error"]);
   if ((args.flags.has("--json") || args.flags.has("--sample")) && !args.flags.has("--dry-run")) {
     throw new Error("--json / --sample は --dry-run との併用時のみ指定できます");
@@ -142,7 +143,7 @@ const USAGE = `kSQL Flow — kintone バッチランナー (MIT, as-is)
                 [--max-api-calls N] [--lock local-only] [--force-unlock]
   ksql-flow run-all <jobsDir> [--profile p] [--as-of ISO8601] [--dry-run]
                 [--sample 1..50] [--json]
-                [--resume] [--from file.sql] [--only file.sql]
+                [--resume | --resume-batch batch_id] [--from file.sql] [--only file.sql]
                 [--stop-on-error | --continue-on-error]
                 [--max-api-calls N] [--lock local-only] [--force-unlock]
   ksql-flow unlock [--profile p]  # 同一 profile の全 RUNNING を一覧表示後に解除
@@ -154,7 +155,7 @@ const USAGE = `kSQL Flow — kintone バッチランナー (MIT, as-is)
 
 注意:
   unlock / --force-unlock は同一 profile の全 RUNNING が対象です（解除前に一覧表示）。
-  --resume / --from / --only は相互排他、--json / --sample は --dry-run 専用です。
+  --resume / --resume-batch / --from / --only は相互排他、--json / --sample は --dry-run 専用です。
 
 Exit Codes: 0=成功/NO_DATA 1=検証エラー 2=ASSERT違反 3=実行時エラー 4=部分成功 5=多重起動`;
 
@@ -230,6 +231,7 @@ export async function main(argv: string[]): Promise<number> {
         return await runAllCommand(profile, dir, {
           ...runOptionsFromArgs(args),
           resume: boolFlag(args, "--resume"),
+          resumeBatch: stringFlag(args, "--resume-batch"),
           from: stringFlag(args, "--from"),
           only: stringFlag(args, "--only"),
           stopOnError: boolFlag(args, "--stop-on-error"),

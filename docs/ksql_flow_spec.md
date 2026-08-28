@@ -270,7 +270,7 @@ run-all の失敗時挙動は複数章にまたがるため、ここに要約し
 * 例外 1 — API 上限・バッチタイムアウト: `limits.maxApiCalls` 超過（7.2）時は、オプション指定に関わらず**以降の全ジョブを `SKIPPED (stop-on-error)` で停止**する（カウンタはバッチ全体で単一のため、続行しても後続は実行できない）。`limits.batchTimeoutSec` 超過（7.3）時も同様に以降を `SKIPPED (batch-timeout)` とし、BATCH は `TIMEOUT` になる
 * 例外 2 — 個別ロック競合: run-all 中に単発実行と個別ジョブのロックが衝突した場合（5.5-3）、当該ジョブは FAILED 系ではなく **`SKIPPED (LOCKED)`** となる。FAILED 系ではないため `--stop-on-error` の停止条件にはならず、依存先のみ `SKIPPED (dependency: <ジョブ名>)`、独立ジョブは続行する。Exit 集約では 5 として扱い（10.3。成功と混在時は既定 5 / `--continue-on-error` 4）、BATCH status は成功混在時 `SUCCESS`・全ジョブ SKIPPED 時 `SKIPPED` となるため、**FAILED 系の条件通知は発火しない**
 * 通知: FAILED 系の失敗があれば BATCH レコードも FAILED 系になり、kintone 条件通知は BATCH の 1 通に集約される（8.2）
-* 復旧: `--resume` が失敗・未実行分のみを**元の as-of を引き継いで**再実行する。成功済みジョブは再実行しない（6.3）
+* 復旧: `--resume` / `--resume-batch` が失敗・未実行分のみを**元の as-of を引き継いで**再実行する。成功済みジョブは再実行しない（6.3）
 * 部分適用: 失敗ジョブの書込は途中まで適用された状態で残る。復旧は冪等リランを正とする（5.1）
 
 ---
@@ -368,13 +368,24 @@ kSQL Flow のロックは無条件の相互排他ではなく**リース**です
 ksql run-all ./jobs/ --profile prod --resume
 ```
 
-2. **開始位置指定 (`--from`)**: 指定したファイル以降のジョブを順番に実行。
+2. **対象バッチ指定再開 (`--resume-batch <batch_id>`)**: 指定した `batch_id` の BATCH レコードを再開元として、`--resume` と同じ選抜規則・as-of 引き継ぎを適用します。より新しい BATCH が存在しても指定対象は変わりません。
+
+```bash
+ksql run-all ./jobs/ --profile prod --resume-batch 550e8400-e29b-41d4-a716-446655440000
+```
+
+   * 再開元は**ログアプリだけ**から取得します。logApp 未設定、GET 失敗、不正応答では fail-closed とし、profile 別 `state.json` へフォールバックしません。
+   * `batch_id` が一致する BATCH が 0 件または複数件、あるいは BATCH の `profile` が実行時 profile と異なる場合は Exit 1 です。
+   * JOB 状態は指定 BATCH 配下（`parent_batch_id` が指定値と一致）のレコードだけから取得します。
+   * `--resume` / `--from` / `--only` とは相互排他です。全ジョブが成功済みなら、既存 `--resume` と同様に「再実行が必要なジョブはありません」と表示して Exit 0 です。
+
+3. **開始位置指定 (`--from`)**: 指定したファイル以降のジョブを順番に実行。
 
 ```bash
 ksql run-all ./jobs/ --profile prod --from 02_calc_daily_sales.sql
 ```
 
-3. **ピンポイント単発実行 (`--only`)**: 修正した 1 ファイルのみを実行。
+4. **ピンポイント単発実行 (`--only`)**: 修正した 1 ファイルのみを実行。
 
 ```bash
 ksql run-all ./jobs/ --profile prod --only 02_calc_daily_sales.sql
@@ -383,17 +394,17 @@ ksql run-all ./jobs/ --profile prod --only 02_calc_daily_sales.sql
 ### 6.2 リラン状態の「正」の一元化
 
 * **kintone ログアプリを正（Source of Truth）とし、ローカル `.ksql/state-<profile>.json` はオフライン時のフォールバック**と位置付けます。profile はファイル名として安全な文字へ正規化します。両者を対等に参照する設計は必ず食い違いを生むため、優先順位を固定します。
-* `--resume` はまずログアプリから直近バッチ（`parent_batch_id`）の状態を取得し、到達不能な場合のみ profile 別 state を使用します。この場合その旨を警告表示します。
+* `--resume` はまずログアプリから直近バッチ（`parent_batch_id`）の状態を取得し、到達不能な場合のみ profile 別 state を使用します。この場合その旨を警告表示します。`--resume-batch` にはこのフォールバックを適用しません。
 * state は `schemaVersion: 1` の内部キャッシュであり、手動編集は想定しません。破損または未知の `schemaVersion` は警告を表示して無視し、ログアプリまたは「状態なし」へ fallback します（無言で null 化しません）。
 
-### 6.3 選抜実行の記録と `--resume` の選抜規則
+### 6.3 選抜実行の記録と `--resume` / `--resume-batch` の選抜規則
 
 * **選抜実行（`--from` / `--only`）では、選抜外ジョブに `SKIPPED`（理由 filtered）の JOB レコードを記録する**。これにより「直近バッチに JOB レコードが存在しないジョブ = クラッシュによる未着手 = `--resume` で再実行」という不変条件が常に成立する。
 * `SKIPPED (filtered)` レコードの性質:
   * `job_key` を持たない（分散ロックに関与しない）
   * 依存伝播・通知・Exit Code 集約（10.3）のいずれからも**中立**（集約で 5 として扱わない。依存判定上は満たされたものとして扱う — 3.3）
   * `--resume` の再実行対象に**含めない**（失敗起因の `SKIPPED` とは区別して扱う）
-* `--resume` の再実行対象: 直近バッチで `FAILED` / `ABORTED` / `TIMEOUT` / `SKIPPED`（失敗起因）/ `RUNNING`（クラッシュ）となったジョブ、および **JOB レコードが存在しないジョブ**（未着手）。
+* `--resume` / `--resume-batch` の再実行対象: 再開元バッチで `FAILED` / `ABORTED` / `TIMEOUT` / `SKIPPED`（失敗起因）/ `RUNNING`（クラッシュ）となったジョブ、および **JOB レコードが存在しないジョブ**（未着手）。`--resume` の再開元は直近バッチ、`--resume-batch` は明示指定バッチです。
 
 ---
 
@@ -488,11 +499,13 @@ kintone の API リクエスト数は **1 アプリあたり 1 日 10,000 回**�
 | `last_written_key` | 最終書込キー | 文字列 | 診断情報: 最後に成功した書込チャンクの最終キー値（順序保証なし、→ 5.1）。単調な復旧ウォーターマークや途中再開位置には使用しない。キー値を取得できない操作ではチャンク情報のみ |
 | `api_calls` | API消費回数 | 数値 | 呼び出した kintone REST API の総回数 |
 | `executed_by` | 実行者 | 文字列 | 実行ユーザー / サービスアカウント名 |
-| `host` | 実行ホスト | 文字列 | どの環境で実行されたか |
+| `host` | 実行ホスト | 文字列 | どの環境で実行されたか。環境変数 `KSQL_HOST_LABEL` があればその値、未設定なら `os.hostname()`。ラベルは 1〜64 文字・`[A-Za-z0-9._:-]` のみ（不正は Exit 1）。推奨は `gcp:ksql-flow-demo` / `vps:vm-xxxx` のような短い `基盤:環境名` |
 | `git_ref` | Git リビジョン | 文字列 | 実行時の commit hash（As Code の再現性の要） |
 | `ksql_version` | エンジン版数 | 文字列 | kSQL Flow のバージョン |
 | `error_message` | エラー内容 | 文字列(複数行) | ASSERT 失敗理由または API エラーメッセージ |
 | `log_detail` | 実行詳細ログ | 文字列(複数行) | 実行クエリ履歴・スタックトレース（切り詰めあり → 8.3）。**SKIPPED の理由は本フィールド先頭の `SKIPPED (<理由>)` 形式**（filtered / LOCKED / dependency: x / stop-on-error 等）で記録し、6.3 の resume 選抜と 10.3 の集約判定はこの前方一致を契約とする |
+
+`KSQL_HOST_LABEL` はログアプリの BATCH / JOB 表示・検索用です。ローカルロックファイルの `host` と同一ホストの PID 生存判定は、ラベル設定の有無にかかわらず実ホストの `os.hostname()` を使用します。
 
 ### 8.3 ログの上限とフォールバック
 
@@ -628,12 +641,15 @@ ksql run-all ./jobs/ --profile prod
 # 失敗ジョブからの再開（as-of は元セッションから自動引き継ぎ）
 ksql run-all ./jobs/ --profile prod --resume
 
+# 再開元 BATCH を明示指定（ログアプリ必須・state フォールバックなし）
+ksql run-all ./jobs/ --profile prod --resume-batch <batch_id>
+
 # ハングした前回セッションのロック解除
 # 同一 profile の全 RUNNING が対象。解除前に jobKey / 開始時刻 / 件数を表示
 ksql unlock --profile prod
 ```
 
-CLI はコマンドごとの flag allowlist を持ちます。未知 flag、そのコマンドに不適用な flag、余分な positional、競合 flag は設定ファイル読取・API 呼び出し・ファイル変更より前に usage error（Exit 1）です。`--resume` / `--from` / `--only` は相互排他、`--stop-on-error` / `--continue-on-error` は相互排他です。`--json` / `--sample` は `--dry-run` 併用時のみ、`--check-logapp` は `validate` でのみ受理します。
+CLI はコマンドごとの flag allowlist を持ちます。未知 flag、そのコマンドに不適用な flag、余分な positional、競合 flag は設定ファイル読取・API 呼び出し・ファイル変更より前に usage error（Exit 1）です。`--resume` / `--resume-batch` / `--from` / `--only` は相互排他、`--stop-on-error` / `--continue-on-error` は相互排他です。`--json` / `--sample` は `--dry-run` 併用時のみ、`--check-logapp` は `validate` でのみ受理します。
 
 ### 10.2 dry-run の出力仕様（差分プレビュー）
 
