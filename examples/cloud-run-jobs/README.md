@@ -46,10 +46,13 @@ gcloud run jobs create ksql-daily-batch \
   --max-retries 0 \
   --task-timeout 3600 \
   --memory 1Gi \
+  --service-account SA_EMAIL \
   --set-secrets "KSQL_TOKEN_ORDERS=KSQL_TOKEN_ORDERS:latest,KSQL_TOKEN_LOGS=KSQL_TOKEN_LOGS:latest"
 ```
 
 設定の意図:
+
+- **`--service-account` は必須と考えてください**（実機で確認）。省略すると既定の Compute Engine サービスアカウントで動くため、§2 で実行 SA に付けた Secret 読取権が使われず、権限設計が崩れます。
 
 - **`--max-retries 0`** — 失敗時の自動リトライはさせません。kSQL Flow の失敗は Exit Code で分類されており、機械的な再実行が安全とは限らないためです（リランは下記の `--resume` で明示的に）。
 - **`--task-timeout`** は `ksql.config.json` の `batchTimeoutSec` **以上**にします。逆にすると、ロックの stale 回収より先にコンテナが打ち切られます。
@@ -59,6 +62,13 @@ gcloud run jobs create ksql-daily-batch \
 
 ```bash
 gcloud run jobs execute ksql-daily-batch --region asia-northeast1 --wait
+```
+
+デプロイ後の疎通確認は、書込のない `validate` を引数上書きで実行するのが安全です（実機確認済み。**先頭に `ksql-flow` を含める**こと — このイメージは ENTRYPOINT を持たないため、`--args` は CMD 全体を置き換えます）:
+
+```bash
+gcloud run jobs execute ksql-daily-batch --region asia-northeast1 --wait \
+  --args="ksql-flow,validate,--profile,prod,--check-logapp"
 ```
 
 ## 4. Cloud Scheduler で毎朝起動
