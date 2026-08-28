@@ -206,7 +206,7 @@ ksql-flow run-all jobs --profile stg --dry-run --json > dry-run.json
 
 [examples/windows-task-scheduler/run_batch.bat](examples/windows-task-scheduler/run_batch.bat) を利用できます。`.ps1` に置き換えて Windows PowerShell 5.1 (`powershell.exe`) から実行する場合、日本語を含むスクリプトは **UTF-8 with BOM** で保存してください。BOM なし UTF-8 は PowerShell 5.1 で ANSI と解釈され、文字化けやパースエラーになることがあります。PowerShell 7 (`pwsh`) は BOM なし UTF-8 を標準で扱います。
 
-実行環境別のセットアップ例（GitHub Actions / タスクスケジューラ / cron / Docker）は [examples/](https://github.com/rex0220/ksql-flow/tree/main/examples) を参照してください（npm パッケージには含まれません）。
+実行環境別のセットアップ例（GitHub Actions / タスクスケジューラ / cron / Docker / Cloud Run Jobs）は [examples/](https://github.com/rex0220/ksql-flow/tree/main/examples) を参照してください（npm パッケージには含まれません）。
 
 ## ドキュメント
 
