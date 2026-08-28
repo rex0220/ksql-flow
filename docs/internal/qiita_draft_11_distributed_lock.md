@@ -78,12 +78,12 @@ kSQL Flow の規則はこうです:
 
 ```mermaid
 flowchart TB
-    ACQ["実行開始<br>job_key = prod:job名 で RUNNING を INSERT"]
+    ACQ["実行開始<br>job_key = prod:job名 で<br>RUNNING を INSERT"]
     OK["INSERT 成功 = ロック取得"]
     NG["400 = 重複の可能性<br>再検索で RUNNING を確認 → Exit 5"]
     RUN["ジョブ実行"]
-    REL["終了時（成功でも失敗でも）<br>同一レコードを UPDATE:<br>job_key をクリア → job_key_done へ退避"]
-    STALE["クラッシュで RUNNING が残った場合<br>次回実行が started_at + batchTimeoutSec 超過を検知<br>→ TIMEOUT へ更新して自動回収（警告つき）"]
+    REL["終了時（成功でも失敗でも）<br>同一レコードを UPDATE:<br>job_key をクリア →<br>job_key_done へ退避"]
+    STALE["クラッシュで RUNNING が残った場合<br>次回実行が started_at +<br>batchTimeoutSec 超過を検知<br>→ TIMEOUT へ更新して自動回収（警告つき）"]
 
     ACQ --> OK --> RUN --> REL
     ACQ --> NG
