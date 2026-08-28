@@ -13,7 +13,7 @@ tags:
 - GitHub: https://github.com/rex0220/ksql-flow （[Cloud Run Jobs のセットアップ例](https://github.com/rex0220/ksql-flow/tree/main/examples/cloud-run-jobs)）
 - 前回: [【kSQL Flow #11】kintone がロックサーバーになる — 重複禁止フィールドで作る分散ロックと、検索索引ラグの実測](https://qiita.com/rex0220/items/44cf9f6d23c264d14dca)
 
-[#9](https://qiita.com/rex0220/items/dd8ec668b8966e346d48) では月 1,000 円の VPS に kintone バッチを載せ、cron の起動遅延が **+1 秒**であることを実測しました。今回は同じバッチを **Google Cloud Run Jobs** に載せ替えます。ホスト OS の保守（パッチ・再起動・死活監視）が消え、課金は実行時間ベースの従量制。定刻の面でも、Cloud Scheduler の実行要求は予定時刻から **+0.96 秒**で作成されました。
+[#9](https://qiita.com/rex0220/items/dd8ec668b8966e346d48) では月 1,000 円の VPS に kintone バッチを載せ、cron の起動遅延が **+1 秒**であることを実測しました。今回は同じバッチを **Google Cloud Run Jobs** に載せ替えます。ホスト OS の保守（パッチ・再起動・死活監視）が消え、課金は実行時間ベースの従量制。定刻の面でも、Cloud Scheduler の予定時刻から Cloud Run 実行（Execution）の作成まで **+0.96 秒**でした。
 
 ただし、この記事の本命はその数字ではありません。**ローカルの状態を毎回すべて捨てる使い捨てコンテナの上でも、これまで作ってきた運用設計 — resume・分散ロック・冪等リラン — が成立するのか**。それを実機で確かめる回です。
 
@@ -45,7 +45,7 @@ flowchart LR
 
 - **イメージ**: `node:22-slim` に `npm i -g @rex0220/ksql-flow@0.6.0` とジョブ SQL・設定を COPY するだけの Dockerfile（[examples](https://github.com/rex0220/ksql-flow/tree/main/examples/cloud-run-jobs) 参照）。ビルドはローカル Docker 不要の Cloud Build で **45 秒**でした
 - **認証情報はイメージに焼かない** — Secret Manager に登録し、`--set-secrets` で環境変数として注入。設定ファイルの `env:` 参照（[#1](https://qiita.com/rex0220/items/893ab4016a5aaf595642) から変わらない形）がそのまま生きます
-- **サービスアカウントは 2 つに分離** — 実行用（Secret の読取だけ）と起動用（ジョブを蹴る `run.invoker` だけ）。最小権限の基本形です
+- **サービスアカウントは 2 つに分離** — 実行用（Secret の読取 `roles/secretmanager.secretAccessor` のみ）と起動用（ジョブを蹴る `roles/run.invoker` のみ）。最小権限の基本形です
 - **予算アラート** — 消し忘れ保険に月 1,000 円で 50/90/100% 通知を設定（検証規模の実費は数十円/月の**見込み**です — 締め請求はまだなので、ここは実測と言いません）
 
 設定の要点は 3 つだけ:
@@ -60,14 +60,14 @@ gcloud run jobs create ksql-batch \
 ```
 
 - **`--max-retries 0`** — 失敗の機械的な再実行はしない。Scheduler 側のリトライも 0。復旧は `--resume`（冪等リラン・[#7](https://qiita.com/rex0220/items/39821af2a79b88de0ed2)）に一本化する、#9 と同じ方針です
-- **`--task-timeout` はランナーの `batchTimeoutSec` より長く** — 逆にすると、ロックの stale 回収より先にコンテナが打ち切られます
+- **`--task-timeout`（秒。例の 4500 = 75 分）はランナーの `batchTimeoutSec` より長く** — 逆にすると、ロックの stale 回収より先にコンテナが打ち切られます
 - **`--tasks 1 --parallelism 1`** — 分散実行はしない。多重起動の抑止はログアプリの分散ロック（[#11](https://qiita.com/rex0220/items/44cf9f6d23c264d14dca)）の仕事です
 
-## 実測 1: Scheduler の実行要求は予定時刻 +0.96 秒
+## 実測 1: Execution 作成は予定時刻から +0.96 秒
 
 Cloud Scheduler に毎朝の起動を任せて大丈夫か。15:15:00 発火のスケジュールを登録すると、Cloud Run 実行（Execution）の作成時刻は **15:15:00.96** — 今回の 2 回の観測では **+0.96 秒 / +0.99 秒**でした。#9 の cron +1 秒と数字は並びますが、あちらはプロセス開始までの測定なので、**厳密な同列比較ではない**点は割り引いてください。それでも「サーバーレスにすると定刻の頭出しがルーズになる」兆候は、今回の観測範囲ではありませんでした。
 
-ユーザー処理の開始はここからで、コンテナの準備に 20〜30 秒。全体では `run-all` 完走まで **35 秒**（うちバッチ本体は数秒）でした。毎朝のバッチが「6:00:00 に実行要求が立ち、6:00:35 に終わる」世界です。秒を争う用途には向きませんが、分単位の定刻運用には十分でしょう。
+ユーザー処理の開始はここからで、コンテナの準備に 20〜30 秒。全体では `run-all` 完走まで **35 秒**（うちバッチ本体は数秒）でした。毎朝のバッチが「6:00:00 に Execution が立ち、6:00:35 に終わる」世界です。秒を争う用途には向きませんが、分単位の定刻運用には十分でしょう。
 
 ## 実測 2: 使い捨てコンテナでも resume が成立する
 
@@ -106,7 +106,7 @@ Container called exit(5).
 | 罠 | 内容 |
 | --- | --- |
 | `--service-account` 無指定 | 既定の Compute Engine SA で動いてしまい、Secret に付けた最小権限の設計が使われない。**実質必須** |
-| `--args` は CMD 全置換 | ENTRYPOINT なしイメージでは、引数上書きに**バイナリ名から**必要（`--args="ksql-flow,run-all,..."`）。`validate` だけ流す疎通確認にも使う |
+| `--args` は CMD 全置換 | `--args` はイメージの **CMD を丸ごと置換**する。今回のイメージは ENTRYPOINT を持たないため、`--args="ksql-flow,run-all,..."` のように**実行バイナリ名から**指定する必要があった。`validate` だけ流す疎通確認にも便利 |
 | `.gcloudignore` のパターン | パス無しの `run_batch.sh` は **任意階層に一致**し、別ディレクトリの同名ファイルまでビルドコンテキストから消えて COPY が失敗した。ルート限定は `/run_batch.sh` |
 | ホスト名の記録 | コンテナ実行では `os.hostname()` が `localhost` になり、実行環境を区別できない。v0.6 で環境変数 `KSQL_HOST_LABEL` を追加し、`gcp:プロジェクトID` のような表示名を記録できるようにした（この経緯は次回） |
 | CLI の fail-closed | `validate` に余分な positional を渡すと即 Exit 1。イメージの引数ミスが API 到達前に止まる — 地味に効く |
@@ -151,5 +151,5 @@ kSQL Flow 側の設計（ログアプリが正・冪等リラン・分散ロッ�
 9. **#9**: [月 1,000 円の VPS で kintone バッチを毎朝動かす — cron の遅延は 1 秒だった](https://qiita.com/rex0220/items/dd8ec668b8966e346d48)
 10. **#10**: [スマホのチェック 1 つで VPS のバッチをリランする — 新しいポートを 1 つも開けずに](https://qiita.com/rex0220/items/b841921afe86083f14a0)
 11. **#11**: [kintone がロックサーバーになる — 重複禁止フィールドで作る分散ロックと、検索索引ラグの実測](https://qiita.com/rex0220/items/44cf9f6d23c264d14dca)
-12. **#12（本記事）**: kintone バッチをサーバーレスで毎朝動かす
+12. **#12（本記事）**: kintone バッチを Cloud Run Jobs へ — 使い捨てコンテナでも resume と分散ロックは動くか
 13. 次回、チェックボックスリランのサーバーレス化と、レビューが生んだ v0.6 の話を予定
