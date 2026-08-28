@@ -53,7 +53,8 @@ flowchart LR
 コンテナと聞くと「まず手元に Docker Desktop を入れて…」と身構えますが、今回は**一度も Docker を起動していません**。ビルドは Cloud Build に任せます:
 
 ```bash
-gcloud builds submit \n  --tag asia-northeast1-docker.pkg.dev/PROJECT_ID/ksql/ksql-flow-batch:latest
+gcloud builds submit \
+  --tag asia-northeast1-docker.pkg.dev/PROJECT_ID/ksql/ksql-flow-batch:latest
 ```
 
 この 1 コマンドの中身は 3 段階です:
