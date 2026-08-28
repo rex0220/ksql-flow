@@ -23,7 +23,7 @@
 - 設定されている場合、**ログアプリへ記録する host**（BATCH / JOB レコード）に `os.hostname()` の代わりにこの値を使う
 - 検証: 1〜64 文字・使用可能文字は `[A-Za-z0-9._:-]`（不正なら Exit 1・fail-closed）
 - **重要（罠）**: ローカルロックファイルの host（`src/lock.ts:31`）と同一ホスト生存判定（`src/lock.ts:97` の `content.host === os.hostname()` 比較）は**実ホスト名のまま変更しない**こと。ラベルを混ぜると「同一ホストで PID 生存中は回収しない」保証（仕様 §5.5-1・記事 #11 の防壁）が壊れる。ラベルはあくまでログアプリの表示・検索用の識別子
-- 推奨値の例（ドキュメント記載用）: `gcp:ksql-flow-demo:asia-northeast1:ksql-batch` / `vps:vm-xxxx` / 未設定なら従来どおり `os.hostname()`
+- 推奨値の例（ドキュメント記載用）: `gcp:ksql-flow-demo` / `vps:vm-xxxx` のような**短い基盤:環境名**（オーナー方針: 一覧・通知で読める長さ。region やジョブ名まで詰め込まない）。未設定なら従来どおり `os.hostname()`
 
 ## 利用側（参考・my-ksql-jobs 側で対応）
 
