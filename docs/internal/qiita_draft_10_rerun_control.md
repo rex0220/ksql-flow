@@ -311,4 +311,5 @@ kintone の **API トークンはフィールドアクセス権の対象外**で
 8. **#8**: [バッチの失敗は 4 種類ある — 自動リラン・AI 診断・人間の判断の切り分け](https://qiita.com/rex0220/items/30cac8d8b52ec8ac782a)
 9. **#9**: [月 1,000 円の VPS で kintone バッチを毎朝動かす — cron の遅延は 1 秒だった](https://qiita.com/rex0220/items/dd8ec668b8966e346d48)
 10. **#10（本記事）**: スマホのチェック 1 つで VPS のバッチをリランする
-11. 以降、Google Cloud（Cloud Run Jobs）と、設計深掘りの続き（分散ロックの内部・全文検索索引の書込ラグ実測）を予定
+11. **#11**: [kintone がロックサーバーになる — 重複禁止フィールドで作る分散ロックと、検索索引ラグの実測](https://qiita.com/rex0220/items/44cf9f6d23c264d14dca)
+12. 以降、Google Cloud（Cloud Run Jobs）などを予定
