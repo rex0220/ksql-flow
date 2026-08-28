@@ -2,10 +2,12 @@
 
 このプロジェクトの主な変更を記録します。
 
-## [0.5.0] - Unreleased
+## [0.5.0] - 2026-08-28
 
-- `job_key` の入力ガードを追加。ジョブ名 `__batch__`、プロファイル名／ジョブ名に `:` を含む設定、完成した `{profile}:{name}` が 65 UTF-16 コード単位以上になる設定は、`validate` / `run` / `run-all` で API 呼び出し前に Exit 1 となります。
-- **v0.4 からの移行:** v0.4 まで動作していた `:` 入り・65 文字以上・`__batch__` というジョブ名は v0.5 では実行できません。ジョブファイルの `@ksql name` で、`:` を含まない 64 文字以内のキーになる別名へ変更してください（プロファイル名に `:` がある場合は `ksql.config.json` 側も変更してください）。
+- **`job_key` の入力ガードを追加**（170 tests green）。ジョブ名 `__batch__`、プロファイル名／ジョブ名に `:` を含む設定、完成した `{profile}:{name}` が 65 UTF-16 コード単位以上になる設定は、`validate` / `run` / `run-all` で API 呼び出し前に Exit 1 となります。
+- **v0.4 からの移行:** v0.4 まで動作していた `:` 入り・65 文字以上・`__batch__` というジョブ名は v0.5 では実行できません。ジョブファイルの `@ksql name` で、`:` を含まない 64 文字以内のキーになる別名へ変更してください（プロファイル名に `:` がある場合は `ksql.config.json` 側も変更してください）。上限 64 文字と「数え方は UTF-16 コード単位（JavaScript の `.length` と一致）」は 2026-08-28 の kintone 実機測定で確認した値です。
+- 同梱アプリテンプレートを更新: **アプリの説明**（レコードの見方・リラン依頼の手順・編集方針・障害対応ランブックへの導線）を収録。説明文中のランブック URL は各自のジョブリポジトリへ差し替えてください（雛形は [ksql-flow-template](https://github.com/rex0220/ksql-flow-template) の `docs/runbook.md` に同梱）。
+- 公開仕様書 §5.5 を改訂: 分散ロックを**リース（時限付き占有）**として保証範囲を明文化し、stale 回収検知時の**復旧手順（ランブック）**・自動回収を許容できるジョブ / 危険なジョブの二分類・運用前提（NTP・レコード ACL 不使用・全件閲覧トークン）・**必須監視構成**（`RUNNING` 長時間のリマインダー通知）を追加。
 
 ## [0.4.1] - 2026-08-27
 
@@ -50,6 +52,8 @@
 - `--check-logapp` の選択肢集合検査、template 契約テスト、Node 18 / npm pack install smoke CI、unlock 対象一覧表示を追加。
 - clientCert / proxy と validate の推定 API 消費・所要時間表示を v0.1 非対応として明記。
 
+[0.5.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.5.0
+[0.4.1]: https://github.com/rex0220/ksql-flow/releases/tag/v0.4.1
 [0.4.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.4.0
 [0.3.1]: https://github.com/rex0220/ksql-flow/releases/tag/v0.3.1
 [0.3.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.3.0
