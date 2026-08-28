@@ -147,7 +147,7 @@
 | - | ④'' 共有レンタルサーバー編 | **見送り** — さくら等は FreeBSD で Node 公式バイナリ無し・Docker 不可・国外 IP フィルターで GitHub 遮断。#9 内で 1 段落触れるに留める |
 | 10 | リラン指示ポーラー編（#10） | **公開済み 2026-08-28**: https://qiita.com/rex0220/items/b841921afe86083f14a0（チェック 1 つで VPS リラン・ポート 0 開放・チェックボックス分離・リマインダー停止検知・実機罠 3 つ・実測 4 分。ChatGPT 9.9 消化） |
 | 11 | 分散ロック深掘り（#11） | **公開済み 2026-08-28**: https://qiita.com/rex0220/items/44cf9f6d23c264d14dca（重複禁止 INSERT = create-if-absent・リースとしての保証範囲/残余リスク/復旧手順・二層ロック(cwd 単位)・job_key ライフサイクル・実測 3 本(#3/#7/#10)+同時 INSERT 未実測の明記・B175 索引ラグ引用(許諾 4 条件遵守)・KLIKE 規約 2 行。ChatGPT 9.8 / Codex GO 消化済み） |
-| 12 | ④'-b GCP 編 | **実機検証完了（2026-08-28）・執筆可** — ksql-flow-demo で全チェーン検証済み: Cloud Build 45 秒・validate 疎通・run-all 完走(SUCCESS/API 8 回/35 秒)・Scheduler 発火 **+0.96 秒**(#9 VPS cron +1 秒と同水準)→PAUSED。実機知見 3 点(--service-account 必須・--args は CMD 全置換で先頭 ksql-flow・validate は positional 不可)は examples へ反映済み。残ドリル: ロック衝突(重量ジョブで GCP×VPS 同時起動→Exit 5 と「コンソール上は失敗に見える」の実証)。手順・記録は my-ksql-jobs/docs/gcp_setup.md。共通設計論もこの記事が持つ |
+| 12 | ④'-b GCP 編 | **実機検証完了（2026-08-28）・執筆可** — ksql-flow-demo で全チェーン検証済み: Cloud Build 45 秒・validate 疎通・run-all 完走(SUCCESS/API 8 回/35 秒)・Scheduler 発火 **+0.96 秒**(#9 VPS cron +1 秒と同水準)→PAUSED。実機知見 3 点(--service-account 必須・--args は CMD 全置換で先頭 ksql-flow・validate は positional 不可)は examples へ反映済み。ロック衝突ドリルも完了(2026-08-28): 読取専用 14 ジョブでロック 60 秒保持→GCP 後発 exit(5)・コンソール「失敗」表示・保持側完走・次回実行成功の全周を実測(起動元は Windows 開発機×GCP — ロックの起動元非依存の実証)。手順・記録は my-ksql-jobs/docs/gcp_setup.md。共通設計論もこの記事が持つ |
 | - | ④'-a AWS 編 / ④'-c Azure 編 | **見送り（2026-08-24）** — AWS はアカウント利用不能で実機検証不可・Azure は絞り込みで温存 |
 | 10 | ⑤ 設計深掘り | ネタ在庫として温存・反応を見て |
 | 11 | ⑦ AI 2 体制（任意） | 独立タイミングで可 |
