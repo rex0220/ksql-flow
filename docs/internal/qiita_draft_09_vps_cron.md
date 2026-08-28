@@ -633,4 +633,5 @@ systemctl list-timers ksql-batch.timer   # 次回実行時刻の確認
 9. **#9（本記事）**: 月 1,000 円の VPS で kintone バッチを毎朝動かす
 10. **#10**: [スマホのチェック 1 つで VPS のバッチをリランする — 新しいポートを 1 つも開けずに](https://qiita.com/rex0220/items/b841921afe86083f14a0)
 11. **#11**: [kintone がロックサーバーになる — 重複禁止フィールドで作る分散ロックと、検索索引ラグの実測](https://qiita.com/rex0220/items/44cf9f6d23c264d14dca)
-12. 以降、Google Cloud（Cloud Run Jobs）などを予定
+12. **#12**: [kintone バッチを Cloud Run Jobs へ — 使い捨てコンテナでも resume と分散ロックは動くか](https://qiita.com/rex0220/items/3c3d49419f91e582d1ab)
+13. 以降、リラン指示のサーバーレス化と v0.6 の話などを予定

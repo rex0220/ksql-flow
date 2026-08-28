@@ -242,5 +242,5 @@ kSQL Flow 側の設計（ログアプリが正・冪等リラン・分散ロッ�
 9. **#9**: [月 1,000 円の VPS で kintone バッチを毎朝動かす — cron の遅延は 1 秒だった](https://qiita.com/rex0220/items/dd8ec668b8966e346d48)
 10. **#10**: [スマホのチェック 1 つで VPS のバッチをリランする — 新しいポートを 1 つも開けずに](https://qiita.com/rex0220/items/b841921afe86083f14a0)
 11. **#11**: [kintone がロックサーバーになる — 重複禁止フィールドで作る分散ロックと、検索索引ラグの実測](https://qiita.com/rex0220/items/44cf9f6d23c264d14dca)
-12. **#12（本記事）**: kintone バッチを Cloud Run Jobs へ — 使い捨てコンテナでも resume と分散ロックは動くか
+12. **#12（本記事）**: [kintone バッチを Cloud Run Jobs へ — 使い捨てコンテナでも resume と分散ロックは動くか](https://qiita.com/rex0220/items/3c3d49419f91e582d1ab)
 13. 次回、チェックボックスリランのサーバーレス化と、レビューが生んだ v0.6 の話を予定
