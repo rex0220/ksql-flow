@@ -43,10 +43,26 @@ flowchart LR
     JOB -->|"読取・書込・ロック・ログ"| KT
 ```
 
-- **イメージ**: `node:22-slim` に `npm i -g @rex0220/ksql-flow@0.6.0` とジョブ SQL・設定を COPY するだけの Dockerfile（[examples](https://github.com/rex0220/ksql-flow/tree/main/examples/cloud-run-jobs) 参照）。ビルドはローカル Docker 不要の Cloud Build で **45 秒**でした
+- **イメージ**: `node:22-slim` に `npm i -g @rex0220/ksql-flow@0.6.0` とジョブ SQL・設定を COPY するだけの Dockerfile（[examples](https://github.com/rex0220/ksql-flow/tree/main/examples/cloud-run-jobs) 参照）。ビルドは次項の Cloud Build で行い、**ローカルに Docker は不要**です
 - **認証情報はイメージに焼かない** — Secret Manager に登録し、`--set-secrets` で環境変数として注入。設定ファイルの `env:` 参照（[#1](https://qiita.com/rex0220/items/893ab4016a5aaf595642) から変わらない形）がそのまま生きます
 - **サービスアカウントは 2 つに分離** — 実行用（Secret の読取 `roles/secretmanager.secretAccessor` のみ）と起動用（ジョブを蹴る `roles/run.invoker` のみ）。最小権限の基本形です
 - **予算アラート** — 消し忘れ保険に月 1,000 円で 50/90/100% 通知を設定（検証規模の実費は数十円/月の**見込み**です — 締め請求はまだなので、ここは実測と言いません）
+
+### ビルドもサーバーレス — ローカル Docker なしでイメージを作る
+
+コンテナと聞くと「まず手元に Docker Desktop を入れて…」と身構えますが、今回は**一度も Docker を起動していません**。ビルドは Cloud Build に任せます:
+
+```bash
+gcloud builds submit \n  --tag asia-northeast1-docker.pkg.dev/PROJECT_ID/ksql/ksql-flow-batch:latest
+```
+
+この 1 コマンドの中身は 3 段階です:
+
+1. **ソースのアップロード** — カレントディレクトリ一式を Cloud Storage へ送る。**何を送るかは `.gcloudignore` が決める**ので、`.env` などの秘密は必ず除外しておく（後述の罠集も参照）
+2. **リモートビルド** — Google 側のビルドマシンが `Dockerfile` を読んでイメージをビルド
+3. **push** — できたイメージを Artifact Registry（コンテナ置き場）へ登録
+
+実測では**初回 45 秒**・2 回目以降は 35〜38 秒。開発機に必要なのは gcloud CLI だけで、Docker のインストール・デーモン起動・OS ごとの差異とは無縁です。CI からも同じコマンドで叩けるので、「手元でビルドしたイメージと CI のイメージが違う」問題も起きません。
 
 設定の要点は 3 つだけ:
 
