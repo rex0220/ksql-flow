@@ -171,3 +171,10 @@
 - **`rerun_state` の `REQUESTED`** は人間が設定する値ではなくなり、**Exit 5 からの継続要求を表すポーラー側のマーカー**に意味が変わる。
 - 影響: 追加フィールドは 9 → **10**（ログアプリは 23 → 33）。滞留通知の条件は「チェックが入ったまま `rerun_state` が未選択または `REQUESTED`」に変わる。
 - 反映: `rerun_trigger_design.md` v7 §4.1・§4.3・§4.3.0・§4.3.1・§4.4・§4.5・§4.6・§4.9。`my-ksql-jobs/dev/add_rerun_fields.console.js`。実装計画は要改訂。
+
+## Q13. 実行時 SQL エラーの Exit Code と契約 v1 `SQL_ERROR` の定義（2026-08-30 裁定）
+
+- **経緯**: Execution Contract v1（PROPOSED）§4.2 は `SQL_ERROR` を FAILED/Exit 3 と定義していたが、公開仕様 7.1 と `src/errors.ts` `classifyRuntimeError()` は実行時 SQL エラーも Exit 1 に分類しており、「`executionStarted = true` かつ Exit 1」の失敗を契約の安定コードで表現できなかった（`docs/kSQL-FlowからkSQL-FlowNetへの返信-20260830-M1疑義.md` 疑義 1）。
+- **裁定（オーナー承認済み）**: kSQL-Flow 側提案どおり**契約側を修正**。`SQL_ERROR` = FAILED/**Exit 1**（`executionStarted` は到達状況どおり）、`VALIDATION_ERROR` = SQL 開始前限定（`executionStarted = false` 必須）。Exit 1 は resultCode + `executionStarted` で判別する。実行時 SQL エラーの Exit 3 再分類案は互換性条件（Exit Code 維持）に抵触するため不採用。
+- **反映**: ksql-flownet main `c95cbc4`（契約 §4.2/§12・変更点一覧 §3・draft schema・fixture `sql-error.json`）。本リポジトリは `docs/internal/flow_m1_execution_contract_task.md` §3 の変換表と `schema/execution-result-v1.schema.json`（実装時）へ反映する。裁定文書: `docs/kSQL-FlowNetからの返信-20260830-M1疑義裁定.md`。
+- 付随合意: orchestrator モード 4 オプションの全か無か規則・§13 予告 11 項目に異議なし。補足 3 点（result-json 一意パスは FlowNet 責務 / schema 正本は kSQL-Flow 同梱版で `$id`+contract version を含め capabilities から参照可能に / 既存 `job_key` 系の制約は変えない）。
