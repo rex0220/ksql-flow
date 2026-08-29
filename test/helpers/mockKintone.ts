@@ -225,6 +225,7 @@ export class MockKintone {
     if (body.records.length > 100) throw new MockApiError(400, "CB_VA01", "records must be 100 or less");
     const created: StoredRecord[] = [];
     for (const record of body.records) {
+      this.validateRecordFields(body.app, record);
       const values: Record<string, string> = {};
       for (const [code, item] of Object.entries(record)) {
         values[code] = normalizeValue(item.value);
@@ -314,6 +315,7 @@ export class MockKintone {
     for (const update of body.records) {
       const stored = entry.records.find((row) => row.id === Number(update.id));
       if (!stored) throw new MockApiError(404, "GAIA_RE01", `record ${update.id} not found in app ${body.app}`);
+      this.validateRecordFields(body.app, update.record);
       const next: Record<string, string> = { ...stored.values };
       for (const [code, item] of Object.entries(update.record)) {
         next[code] = normalizeValue(item.value);
@@ -347,6 +349,22 @@ export class MockKintone {
         throw new MockApiError(400, "CB_VA01", "入力内容が正しくありません。", {
           [`record.${code}.value`]: { messages: ["値がほかのレコードと重複しています。"] },
         });
+      }
+    }
+  }
+
+  private validateRecordFields(appId: number, record: Record<string, { value: unknown }>): void {
+    const definitions = this.apps.get(appId)!.def.fields;
+    for (const [code, item] of Object.entries(record)) {
+      const definition = definitions[code];
+      if (definition === undefined) {
+        throw new MockApiError(400, "CB_VA01", `field ${code} is not defined`);
+      }
+      if (definition.type === "DROP_DOWN" && definition.options !== undefined) {
+        const value = normalizeValue(item.value);
+        if (value !== "" && !definition.options.includes(value)) {
+          throw new MockApiError(400, "CB_VA01", `field ${code} does not accept ${value}`);
+        }
       }
     }
   }

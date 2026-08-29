@@ -5,6 +5,7 @@ import { EXIT, type ExitCode } from "./types";
 import { errorMessage } from "./errors";
 import { validateCommand } from "./commands/validate";
 import { runCommand, writeOrchestratorStartupFailure, type OrchestratorRunOptions } from "./commands/run";
+import { SecretMasker } from "./logging/mask";
 import { runAllCommand } from "./commands/runAll";
 import { unlockCommand } from "./commands/unlock";
 import { initLogAppCommand, checkLogAppCommand } from "./commands/initLogapp";
@@ -277,7 +278,8 @@ export async function main(argv: string[]): Promise<number> {
               orchestrator,
               profile.name,
               new Error("run には -f <file.sql> が必要です"),
-              EXIT.VALIDATION
+              EXIT.VALIDATION,
+              new SecretMasker(profile)
             );
           }
           console.error("エラー: run には -f <file.sql> が必要です");

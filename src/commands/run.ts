@@ -14,6 +14,7 @@ import { normalizeJobOutcome, RuntimeFailureKind, writeExecutionResult } from ".
 import { runJob, RUNNER_VERSION } from "../executor";
 import { loadJobFile } from "../jobs";
 import { buildJobKey } from "../jobkey";
+import { ORCHESTRATOR_LOG_APP_FIELD_CODES } from "../logapp";
 import { LocalLock } from "../lock";
 import { SecretMasker } from "../logging/mask";
 import { notifyFailure, notifyHeartbeat } from "../notify";
@@ -281,6 +282,11 @@ async function runOrchestratedCommand(
       baseFetch: options.baseFetch,
       out: options.out,
       orchestrator: true,
+      correlation: {
+        correlationId: options.correlationId,
+        attemptId: options.attemptId,
+        executionId,
+      },
     });
     out = env.out;
 
@@ -293,6 +299,8 @@ async function runOrchestratedCommand(
     const jobKey = buildJobKey(profile.name, job.name);
     asOf = parseAsOf(options.asOf);
     asOfEcho = options.asOf ?? asOf.toISOString();
+
+    await env.logApp!.requireFields(ORCHESTRATOR_LOG_APP_FIELD_CODES);
 
     out(`[RUN] ${job.fileName} (profile: ${profile.name}, as-of: ${asOf.toISOString()})`);
     localLock = new LocalLock(process.cwd(), profile.name);
@@ -314,6 +322,7 @@ async function runOrchestratedCommand(
       batchId: env.batchId,
       timeoutMs: effectiveTimeoutMs(job.timeoutSec, batchDeadline),
       jobKey,
+      correlation: { correlationId: options.correlationId, attemptId: options.attemptId },
       onExecutionStart: (startedAt) => {
         executionStarted = true;
         executionStartedAt = startedAt;
@@ -388,7 +397,8 @@ async function runOrchestratedCommand(
     executionStarted,
     startedAt: executionStartedAt,
     finishedAt,
-    lastSuccessfulChunkNo: null,
+    lastSuccessfulChunkNo:
+      finalOutcome.writeChunks !== undefined && finalOutcome.writeChunks > 0 ? finalOutcome.writeChunks : null,
     ksqlFlowVersion: RUNNER_VERSION,
     engineVersion,
     failureKind,
@@ -443,7 +453,8 @@ export function writeOrchestratorStartupFailure(
   options: Pick<OrchestratorRunOptions, "resultJson" | "correlationId" | "attemptId" | "expectedJobId" | "asOf">,
   profileName: string,
   error: unknown,
-  exitCode: ExitCode = EXIT.VALIDATION
+  exitCode: ExitCode = EXIT.VALIDATION,
+  masker: Pick<SecretMasker, "mask"> = { mask: (value) => value }
 ): ExitCode {
   const executionId = crypto.randomUUID();
   const finishedAt = new Date();
@@ -463,13 +474,13 @@ export function writeOrchestratorStartupFailure(
     ...(exitCode === EXIT.RUNTIME ? { failureKind: "INTERNAL_ERROR" as const } : {}),
     cause: error,
     error: { message: errorMessage(error) },
-    masker: { mask: (value) => value },
+    masker,
   });
-  console.error(`エラー: ${errorMessage(error)}`);
+  console.error(masker.mask(`エラー: ${errorMessage(error)}`));
   try {
     writeExecutionResult(options.resultJson, result);
   } catch (writeError) {
-    console.error(`エラー: Execution Result を出力できません: ${errorMessage(writeError)}`);
+    console.error(masker.mask(`エラー: Execution Result を出力できません: ${errorMessage(writeError)}`));
   }
   return result.exitCode;
 }

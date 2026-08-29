@@ -52,6 +52,8 @@ export interface RunJobParams {
   onExecutionStart?: (startedAt: Date) => void | Promise<void>;
   /** Execution Result 境界へ分類材料を渡す観測フック。既存の結果・ログには影響させない。 */
   onExecutionError?: (cause: unknown, code?: string) => void;
+  /** orchestrator 実行の JOB レコードにだけ保存する相関値。 */
+  correlation?: { correlationId: string; attemptId: string };
 }
 
 // package.json の version を正とする（ハードコードだと npm version 更新に追随できず、
@@ -133,6 +135,12 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
     host: env.logHost,
     git_ref: resolveGitRef(path.dirname(job.filePath)),
     ksql_version: `flow ${RUNNER_VERSION} / engine ${engineVersion}`,
+    ...(params.correlation !== undefined ? {
+      correlation_id: params.correlation.correlationId,
+      attempt_id: params.correlation.attemptId,
+      execution_id: params.batchId,
+      job_id: job.name,
+    } : {}),
   };
 
   // 分散ロック（設計書 5.5-2/4）
@@ -366,6 +374,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
     deletedCount: actualDeletedCount,
     apiCalls: apiCallsJob,
     lastWrittenKey: writeChunks > 0 ? lastWrittenKey ?? `chunk:${writeChunks}` : undefined,
+    writeChunks,
   };
 }
 

@@ -6,7 +6,7 @@ import { RunnerEnv } from "./executor";
 import { createHttpLayer, engineClientConfig } from "./http";
 import { resolveLogHost } from "./host";
 import { LogAppClient } from "./logapp";
-import { JsonlLogger, PendingQueue } from "./logging/jsonl";
+import { JsonlLogger, PendingQueue, type JsonlCorrelationContext } from "./logging/jsonl";
 import { SecretMasker } from "./logging/mask";
 
 export interface CreateEnvOptions {
@@ -19,6 +19,8 @@ export interface CreateEnvOptions {
   json?: boolean;
   /** Execution Contract の orchestrator モード。人間向け出力を stderr に固定する。 */
   orchestrator?: boolean;
+  /** orchestrator 時の JSONL 全イベントに付与する相関値。 */
+  correlation?: JsonlCorrelationContext;
 }
 
 export interface RunnerEnvBundle extends RunnerEnv {
@@ -36,7 +38,7 @@ export function createRunnerEnv(profile: ResolvedProfile, options: CreateEnvOpti
     (options.orchestrator === true
       ? (line: string) => console.error(masker.mask(line))
       : (line: string) => console.log(masker.mask(line)));
-  const jsonl = new JsonlLogger(profile.logging.localDir, batchId, profile.name, masker);
+  const jsonl = new JsonlLogger(profile.logging.localDir, batchId, profile.name, masker, options.correlation);
   const pending = new PendingQueue(profile.logging.localDir, masker);
 
   let maxApiCalls = profile.limits.maxApiCalls;

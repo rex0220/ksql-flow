@@ -5,7 +5,7 @@ import { runCommand } from "../../src/commands/run";
 import { writeExecutionResult, type ExecutionResult } from "../../src/contract";
 import { toKintoneDateTime } from "../../src/logapp";
 import { EXIT } from "../../src/types";
-import { AS_OF, buildWorld, SAMPLE_JOB, type TestWorld, writeJob } from "../helpers/world";
+import { AS_OF, buildWorld, logRecords, SAMPLE_JOB, type TestWorld, writeJob } from "../helpers/world";
 
 jest.setTimeout(30_000);
 
@@ -76,9 +76,83 @@ test("--result-json - は stdout に JSON object 1 個 + LF だけを書き、ID
     asOf: AS_OF,
     exitCode: code,
     executionStarted: true,
+    lastSuccessfulChunkNo: null,
   });
   expect(stderr.mock.calls.flat().join("\n")).toContain("[RUN]");
   expect(stderr.mock.calls.flat().join("\n")).toContain("=> NO_DATA");
+});
+
+test("orchestrator JOB と JSONL 全イベントへ相関値を記録し、書込 chunk 数を結果へ渡す", async () => {
+  world = buildWorld({
+    orders: [{ 顧客コード: "C1", 金額: "100", 受注日: "2026-08-05", ステータス: "受注完了" }],
+  });
+  const file = writeJob(world, "01_monthly.sql", SAMPLE_JOB);
+  const target = path.join(world.dir, "correlated.json");
+  expect(await runCommand(world.profile, file, options(target))).toBe(EXIT.OK);
+  const result = readResult(target);
+  expect(result.lastSuccessfulChunkNo).toBe(1);
+
+  const job = logRecords(world).find((record) => record.record_type === "JOB");
+  expect(job).toMatchObject({
+    correlation_id: "network_run:001",
+    attempt_id: "attempt.001",
+    execution_id: result.executionId,
+    batch_id: result.executionId,
+    job_id: "monthly_sales_sync",
+  });
+
+  const logFile = path.join(world.profile.logging.localDir, `${result.executionId}.jsonl`);
+  const events = fs.readFileSync(logFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  expect(events.length).toBeGreaterThan(0);
+  for (const event of events) {
+    expect(event).toMatchObject({
+      correlationId: "network_run:001",
+      attemptId: "attempt.001",
+      executionId: result.executionId,
+    });
+  }
+  const fieldGets = world.mock.requests.filter(
+    (request) => request.appId === 999 && request.method === "GET" && request.path.endsWith("/app/form/fields.json")
+  );
+  expect(fieldGets).toHaveLength(1);
+});
+
+test("旧ログアプリは standalone で従来どおり動作し、orchestrator は SQL 開始前に fail-closed", async () => {
+  world = buildWorld({ orders: [], withOrchestratorFields: false });
+  const file = writeJob(world, "01_monthly.sql", SAMPLE_JOB);
+
+  expect(await runCommand(world.profile, file, {
+    asOf: AS_OF,
+    baseFetch: world.mock.fetch,
+    out: world.out,
+  })).toBe(EXIT.OK);
+  const standaloneJob = logRecords(world).find((record) => record.record_type === "JOB");
+  expect(standaloneJob?.status).toBe("NO_DATA");
+  expect(standaloneJob?.correlation_id).toBeUndefined();
+  const standaloneEvents = fs.readFileSync(
+    path.join(world.profile.logging.localDir, `${standaloneJob!.batch_id}.jsonl`),
+    "utf8"
+  ).trim().split("\n").map((line) => JSON.parse(line));
+  for (const event of standaloneEvents) {
+    expect(event.correlationId).toBeUndefined();
+    expect(event.attemptId).toBeUndefined();
+    expect(event.executionId).toBeUndefined();
+  }
+
+  const requestsBefore = world.mock.requests.length;
+  const recordsBefore = logRecords(world).length;
+  const target = path.join(world.dir, "legacy-fail-closed.json");
+  expect(await runCommand(world.profile, file, options(target))).toBe(EXIT.RUNTIME);
+  expect(readResult(target)).toMatchObject({
+    resultCode: "LOCK_UNAVAILABLE",
+    executionStarted: false,
+    exitCode: EXIT.RUNTIME,
+    lastSuccessfulChunkNo: null,
+  });
+  expect(logRecords(world)).toHaveLength(recordsBefore);
+  expect(world.mock.requests.slice(requestsBefore)).toEqual([
+    expect.objectContaining({ method: "GET", appId: 999, path: expect.stringMatching(/app\/form\/fields\.json$/) }),
+  ]);
 });
 
 test("path 出力は同一ディレクトリの完成済み一時 JSON を fsync 後に rename する", () => {

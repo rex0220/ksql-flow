@@ -243,6 +243,13 @@ describe("init-logapp / --check-logapp（設計書 付録 B）", () => {
     const created = world.mock.app(createdId);
     expect(created.def.fields["job_key"]?.unique).toBe(true);
     expect(created.def.fields["log_detail"]?.type).toBe("MULTI_LINE_TEXT");
+    for (const code of ["correlation_id", "attempt_id", "execution_id", "job_id"]) {
+      expect(created.def.fields[code]).toMatchObject({ type: "SINGLE_LINE_TEXT" });
+      expect(created.def.fields[code]?.unique).not.toBe(true);
+      expect(created.def.fields[code]?.required).not.toBe(true);
+    }
+    expect(created.def.fields["runner_execution_started_at"]).toMatchObject({ type: "DATETIME" });
+    expect(created.def.fields["status"]?.options).toContain("CANCELLED");
   });
 
   test("init-logapp: apiToken 認証では明確なエラー (Exit 1)", async () => {
@@ -275,6 +282,19 @@ describe("init-logapp / --check-logapp（設計書 付録 B）", () => {
     expect(code).toBe(EXIT.OK);
     expect(world.output.join("\n")).toContain("OK");
     expect(world.output.join("\n")).toContain("任意フィールド deleted_count が未追加");
+  });
+
+  test("--check-logapp: orchestrator 相関フィールドがない旧アプリは NG", async () => {
+    world = buildWorld({ withOrchestratorFields: false });
+    const code = await checkLogAppCommand(world.profile, {
+      baseFetch: world.mock.fetch,
+      out: world.out,
+    });
+    expect(code).toBe(EXIT.VALIDATION);
+    const text = world.output.join("\n");
+    for (const field of ["correlation_id", "attempt_id", "execution_id", "job_id", "runner_execution_started_at"]) {
+      expect(text).toContain(`フィールド "${field}"`);
+    }
   });
 
   test("--check-logapp: deleted_count が NUMBER 以外なら NG", async () => {

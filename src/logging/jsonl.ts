@@ -2,6 +2,12 @@ import * as fs from "fs";
 import * as path from "path";
 import { SecretMasker } from "./mask";
 
+export interface JsonlCorrelationContext {
+  correlationId: string;
+  attemptId: string;
+  executionId: string;
+}
+
 /**
  * ローカル JSONL ログ（設計書 8.3）。
  * ログアプリの成否に関わらず全イベントを .ksql/logs/<batch_id>.jsonl に記録する。
@@ -14,7 +20,8 @@ export class JsonlLogger {
     readonly localDir: string,
     readonly batchId: string,
     readonly profile: string,
-    private readonly masker: SecretMasker
+    private readonly masker: SecretMasker,
+    private readonly correlation?: JsonlCorrelationContext
   ) {
     fs.mkdirSync(localDir, { recursive: true });
     this.filePath = path.join(localDir, `${batchId}.jsonl`);
@@ -28,6 +35,7 @@ export class JsonlLogger {
       event,
       batchId: this.batchId,
       profile: this.profile,
+      ...(this.correlation ?? {}),
     });
     try {
       fs.appendFileSync(this.filePath, this.masker.mask(line) + "\n");

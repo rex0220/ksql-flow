@@ -26,6 +26,8 @@ export function buildWorld(options: {
   customerUnique?: boolean;
   withLogApp?: boolean;
   withDeletedCount?: boolean;
+  withOrchestratorFields?: boolean;
+  withCancelledStatus?: boolean;
   profilePatch?: Partial<ResolvedProfile>;
 } = {}): TestWorld {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ksql-flow-it-"));
@@ -87,9 +89,19 @@ export function buildWorld(options: {
         record_type: { type: "DROP_DOWN", options: ["BATCH", "JOB"] },
         status: {
           type: "DROP_DOWN",
-          options: ["SUCCESS", "NO_DATA", "FAILED", "ABORTED", "SKIPPED", "RUNNING", "TIMEOUT"],
+          options: [
+            "SUCCESS", "NO_DATA", "FAILED", "ABORTED", "SKIPPED", "RUNNING", "TIMEOUT",
+            ...(options.withCancelledStatus === false ? [] : ["CANCELLED"]),
+          ],
         },
         batch_id: { type: "SINGLE_LINE_TEXT" },
+        ...(options.withOrchestratorFields === false ? {} : {
+          correlation_id: { type: "SINGLE_LINE_TEXT" },
+          attempt_id: { type: "SINGLE_LINE_TEXT" },
+          execution_id: { type: "SINGLE_LINE_TEXT" },
+          job_id: { type: "SINGLE_LINE_TEXT" },
+          runner_execution_started_at: { type: "DATETIME" },
+        }),
         parent_batch_id: { type: "SINGLE_LINE_TEXT" },
         job_key: { type: "SINGLE_LINE_TEXT", unique: true },
         job_key_done: { type: "SINGLE_LINE_TEXT" },

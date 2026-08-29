@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { runCommand } from "../../src/commands/run";
+import { createRunnerEnv } from "../../src/runner";
 import { EXIT } from "../../src/types";
 import {
   AS_OF,
@@ -32,6 +33,18 @@ function notifyCapture(): { calls: Array<{ url: string; body: unknown }>; fetch:
   }) as typeof fetch;
   return { calls, fetch: impl };
 }
+
+test("旧 status 選択肢で CANCELLED 書込が 400 になっても pending 退避して呼出し元へ例外を出さない", async () => {
+  world = buildWorld({
+    withCancelledStatus: false,
+    logRecords: [{ status: "RUNNING", job_key: "test:job", batch_id: "batch" }],
+  });
+  const env = createRunnerEnv(world.profile, { baseFetch: world.mock.fetch, out: world.out });
+  await expect(env.logApp!.finishRecord("1", "test:job", "CANCELLED", {})).resolves.toBe(false);
+  expect(logRecords(world)[0]).toMatchObject({ status: "RUNNING", job_key: "test:job" });
+  expect(env.pending.list()).toHaveLength(1);
+  expect(env.pending.list()[0].op).toMatchObject({ op: "update", recordId: "1" });
+});
 
 describe("run（受入基準 1: サンプルジョブ実行とログアプリ記録）", () => {
   test("正常実行: UPSERT が反映され JOB レコードが SUCCESS で残る", async () => {

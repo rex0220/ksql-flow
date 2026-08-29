@@ -37,6 +37,8 @@ export interface JobOutcome {
   deletedCount: number;
   apiCalls: number;
   lastWrittenKey?: string;
+  /** 実書込が完了した 100 件チャンク数（Execution Result の診断値） */
+  writeChunks?: number;
   /** ASSERT WARNING 等、log_detail へ残す行 */
   detailLines: string[];
 }

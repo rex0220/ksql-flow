@@ -9,9 +9,14 @@ export const LOG_APP_FIELDS: Record<string, { type: string; label: string; uniqu
   status: {
     type: "DROP_DOWN",
     label: "ステータス",
-    options: ["SUCCESS", "NO_DATA", "FAILED", "ABORTED", "SKIPPED", "RUNNING", "TIMEOUT"],
+    options: ["SUCCESS", "NO_DATA", "FAILED", "ABORTED", "SKIPPED", "RUNNING", "TIMEOUT", "CANCELLED"],
   },
   batch_id: { type: "SINGLE_LINE_TEXT", label: "バッチ実行ID" },
+  correlation_id: { type: "SINGLE_LINE_TEXT", label: "相関ID" },
+  attempt_id: { type: "SINGLE_LINE_TEXT", label: "試行ID" },
+  execution_id: { type: "SINGLE_LINE_TEXT", label: "実行ID" },
+  job_id: { type: "SINGLE_LINE_TEXT", label: "論理ジョブ名" },
+  runner_execution_started_at: { type: "DATETIME", label: "SQL実行開始日時" },
   parent_batch_id: { type: "SINGLE_LINE_TEXT", label: "親バッチID" },
   job_key: { type: "SINGLE_LINE_TEXT", label: "ジョブキー", unique: true },
   job_key_done: { type: "SINGLE_LINE_TEXT", label: "ジョブキー履歴" },
@@ -36,6 +41,13 @@ export const LOG_APP_FIELDS: Record<string, { type: string; label: string; uniqu
 
 const LOG_FIELD_CODES = Object.keys(LOG_APP_FIELDS);
 export const OPTIONAL_LOG_APP_FIELD_CODES: ReadonlySet<string> = new Set(["deleted_count"]);
+export const ORCHESTRATOR_LOG_APP_FIELD_CODES: readonly string[] = [
+  "correlation_id",
+  "attempt_id",
+  "execution_id",
+  "job_id",
+  "runner_execution_started_at",
+];
 
 /** kintone 複数行文字列の実効上限（8.3: 約 65,535 字。安全側に切り詰める） */
 const DETAIL_HEAD = 40000;
@@ -81,7 +93,7 @@ export interface RunningRecord {
  * すべてランナー共通の HTTP 層（単一 API カウンタ）経由で行う。
  */
 export class LogAppClient {
-  private deletedCountSupport: Promise<boolean> | null = null;
+  private fieldSupport: Promise<{ codes: ReadonlySet<string>; error?: unknown }> | null = null;
 
   constructor(
     private readonly client: FlowKintoneClient,
@@ -91,31 +103,54 @@ export class LogAppClient {
     private readonly out: (line: string) => void = () => undefined
   ) {}
 
-  /**
-   * v0.2 以前のテンプレートには deleted_count がないため、初回書込前に一度だけ判定する。
-   * Promise 自体をキャッシュし、並行する書込や取得失敗時にも追加 API を発生させない。
-   */
-  private async writableFields(fields: LogRecordFields): Promise<LogRecordFields> {
-    if (this.deletedCountSupport === null) {
-      this.deletedCountSupport = this.client
+  /** getFields の結果をプロセス内で一度だけ取得し、並行書込と厳格検査で共用する。 */
+  private fieldSupportResult(): Promise<{ codes: ReadonlySet<string>; error?: unknown }> {
+    if (this.fieldSupport === null) {
+      this.fieldSupport = this.client
         .getFields(this.appId)
         .then((definitions) => {
-          const supported = definitions.some((field) => field.code === "deleted_count");
-          if (!supported) {
+          const codes = new Set(definitions.map((field) => field.code));
+          if (!codes.has("deleted_count")) {
             this.out("  情報: ログアプリに deleted_count がありません（テンプレート v0.3 で追加。任意）");
           }
-          return supported;
+          return { codes };
         })
-        // 判定失敗でログ書込全体を巻き添えにしない。安全側 = 送らない（旧アプリ互換）に倒し、
-        // reject をキャッシュしない（reject のままだと以後の全書込が pending 退避に堕ちる）
         .catch((error) => {
           this.out(`  情報: ログアプリのフィールド判定に失敗したため deleted_count は送信しません (${errorMessage(error)})`);
-          return false;
+          // standalone は従来フィールドで書込を続行する。orchestrator は error を見て fail-closed にする。
+          const legacyCodes = new Set(LOG_FIELD_CODES.filter(
+            (code) => !OPTIONAL_LOG_APP_FIELD_CODES.has(code) && !ORCHESTRATOR_LOG_APP_FIELD_CODES.includes(code)
+          ));
+          return { codes: legacyCodes, error };
         });
     }
-    if (await this.deletedCountSupport) return fields;
-    const compatible = { ...fields };
-    delete compatible.deleted_count;
+    return this.fieldSupport;
+  }
+
+  /** orchestrator の耐久証跡に必要なフィールドを、ロック取得前に厳格検査する。 */
+  async requireFields(requiredCodes: readonly string[]): Promise<void> {
+    const support = await this.fieldSupportResult();
+    if (support.error !== undefined) {
+      throw new LockUnavailableError(
+        `ログアプリのフィールドを確認できないため orchestrator 実行を開始できません (fail-closed): ${errorMessage(support.error)}`,
+        support.error
+      );
+    }
+    const missing = requiredCodes.filter((code) => !support.codes.has(code));
+    if (missing.length > 0) {
+      throw new LockUnavailableError(
+        `ログアプリに orchestrator 必須フィールドがありません (fail-closed): ${missing.join(", ")}`
+      );
+    }
+  }
+
+  /** 旧 schema 互換のため、実在するフィールドだけを送る。 */
+  private async writableFields(fields: LogRecordFields): Promise<LogRecordFields> {
+    const { codes } = await this.fieldSupportResult();
+    const compatible: LogRecordFields = {};
+    for (const [code, value] of Object.entries(fields)) {
+      if (codes.has(code)) compatible[code] = value;
+    }
     return compatible;
   }
 
@@ -220,7 +255,12 @@ export class LogAppClient {
    * 実行中レコードの終了更新（job_key クリア + job_key_done 退避。設計書 5.5）。
    * 失敗時はローカル JSONL + 再送キューへ退避し、呼び出し元へは失敗を伝えない（8.3）。
    */
-  async finishRecord(recordId: string, jobKey: string, status: JobStatus, fields: LogRecordFields): Promise<boolean> {
+  async finishRecord(
+    recordId: string,
+    jobKey: string,
+    status: JobStatus | "CANCELLED",
+    fields: LogRecordFields
+  ): Promise<boolean> {
     const payload: LogRecordFields = {
       ...fields,
       status,

@@ -6,7 +6,7 @@ const AdmZip = require("adm-zip") as new (file: string) => {
 };
 
 describe("配布ログアプリテンプレート契約", () => {
-  test("旧 template.json が必須 field/type/unique/options を満たす", () => {
+  test("template v0.4 が field/type/unique/options を満たす", () => {
     const zip = new AdmZip(path.resolve("template/ksql-flow-log-template1.zip"));
     const entry = zip.getEntry("01/template.json");
     expect(entry).not.toBeNull();
@@ -34,6 +34,10 @@ describe("配布ログアプリテンプレート契約", () => {
       if (expected.options !== undefined) {
         expect(actual.properties.options.map((option: any) => option.label).sort()).toEqual([...expected.options].sort());
       }
+    }
+    for (const code of ["correlation_id", "attempt_id", "execution_id", "job_id", "runner_execution_started_at"]) {
+      expect(byCode.get(code).properties.required).toBe("false");
+      expect(byCode.get(code).properties.unique).toBe("false");
     }
   });
 });
