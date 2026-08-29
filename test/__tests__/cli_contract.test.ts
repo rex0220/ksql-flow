@@ -9,6 +9,10 @@ describe("CLI public contract", () => {
     ["validate", ["validate", "-f", "job.sql", "--strict", "--check-logapp"]],
     ["validate-all", ["validate-all", "jobs", "--strict"]],
     ["run", ["run", "-f", "job.sql", "--dry-run", "--sample", "5", "--json"]],
+    ["run orchestrator", [
+      "run", "-f", "job.sql", "--result-json", "-", "--correlation-id", "corr:1",
+      "--attempt-id", "attempt.1", "--expected-job-id", "job_1",
+    ]],
     ["run-all", ["run-all", "jobs", "--resume-batch", "batch-123", "--stop-on-error"]],
     ["unlock", ["unlock", "--profile", "prod"]],
     ["init-logapp", ["init-logapp", "--name", "実行ログ"]],
@@ -39,6 +43,59 @@ describe("CLI public contract", () => {
     [["run", "-f", "a.sql", "--sample", "5"], /--dry-run/],
   ])("競合・余分 positional・dry-run 専用フラグを拒否する", (argv, message) => {
     expect(() => validateArgs(parseArgs(argv as string[]))).toThrow(message as RegExp);
+  });
+
+  test.each([
+    [["run", "-f", "a.sql", "--result-json", "-"], /4 フラグは全て/],
+    [[
+      "run-all", "jobs", "--result-json", "-", "--correlation-id", "c", "--attempt-id", "a",
+      "--expected-job-id", "j",
+    ], /未知または不適用|run 専用/],
+    [[
+      "run", "-f", "a.sql", "--dry-run", "--result-json", "-", "--correlation-id", "c",
+      "--attempt-id", "a", "--expected-job-id", "j",
+    ], /併用できません/],
+    [[
+      "run", "-f", "a.sql", "--lock", "local-only", "--result-json", "-", "--correlation-id", "c",
+      "--attempt-id", "a", "--expected-job-id", "j",
+    ], /local-only/],
+    [[
+      "run", "-f", "a.sql", "--result-json", "-", "--correlation-id", "bad id",
+      "--attempt-id", "a", "--expected-job-id", "j",
+    ], /A-Za-z0-9/],
+  ])("orchestrator モードの全-or-none・run 専用・競合・ID 規則を先行検証する", (argv, message) => {
+    expect(() => validateArgs(parseArgs(argv as string[]))).toThrow(message as RegExp);
+  });
+
+  test("4 フラグ認識後の CLI validation failure も stdout へ Execution Result だけを返す", async () => {
+    const chunks: string[] = [];
+    const stdout = jest.spyOn(process.stdout, "write").mockImplementation(((chunk: string | Uint8Array) => {
+      chunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+      return true;
+    }) as typeof process.stdout.write);
+    const error = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const code = await main([
+        "run", "-f", "job.sql", "--dry-run", "--result-json", "-", "--correlation-id", "corr",
+        "--attempt-id", "attempt", "--expected-job-id", "job",
+      ]);
+      expect(code).toBe(EXIT.VALIDATION);
+      expect(stdout).toHaveBeenCalledTimes(1);
+      const raw = chunks.join("");
+      expect(raw.endsWith("\n")).toBe(true);
+      expect(JSON.parse(raw)).toMatchObject({
+        correlationId: "corr",
+        attemptId: "attempt",
+        jobId: "job",
+        resultCode: "VALIDATION_ERROR",
+        executionStarted: false,
+        exitCode: code,
+      });
+      expect(error).toHaveBeenCalled();
+    } finally {
+      stdout.mockRestore();
+      error.mockRestore();
+    }
   });
 
   test("--dryrun typo は設定読取や実行へ進まず Exit 1", async () => {

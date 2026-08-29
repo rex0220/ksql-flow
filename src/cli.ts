@@ -1,9 +1,10 @@
 #!/usr/bin/env node
+import * as fs from "fs";
 import { loadConfig } from "./config";
-import { EXIT } from "./types";
+import { EXIT, type ExitCode } from "./types";
 import { errorMessage } from "./errors";
 import { validateCommand } from "./commands/validate";
-import { runCommand } from "./commands/run";
+import { runCommand, writeOrchestratorStartupFailure, type OrchestratorRunOptions } from "./commands/run";
 import { runAllCommand } from "./commands/runAll";
 import { unlockCommand } from "./commands/unlock";
 import { initLogAppCommand, checkLogAppCommand } from "./commands/initLogapp";
@@ -28,6 +29,10 @@ const VALUE_FLAGS = new Set([
   "--sample",
   "--lock",
   "--name",
+  "--result-json",
+  "--correlation-id",
+  "--attempt-id",
+  "--expected-job-id",
 ]);
 
 const COMMON_FLAGS = ["--profile", "--config", "--help", "-h"] as const;
@@ -38,6 +43,7 @@ const COMMAND_FLAGS: Record<string, ReadonlySet<string>> = {
     ...COMMON_FLAGS,
     "-f", "--file", "--profile", "--config", "--as-of", "--dry-run", "--sample", "--json",
     "--strict", "--max-api-calls", "--lock", "--force-unlock",
+    "--result-json", "--correlation-id", "--attempt-id", "--expected-job-id",
   ]),
   "run-all": new Set([
     ...COMMON_FLAGS,
@@ -71,7 +77,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       }
       if (VALUE_FLAGS.has(arg)) {
         const value = rest[index + 1];
-        if (value === undefined || value.startsWith("-")) {
+        if (value === undefined || (value.startsWith("-") && !(arg === "--result-json" && value === "-"))) {
           throw new Error(`${arg} には値が必要です`);
         }
         flags.set(arg, value);
@@ -115,6 +121,44 @@ export function validateArgs(args: ParsedArgs): void {
   if ((args.flags.has("--json") || args.flags.has("--sample")) && !args.flags.has("--dry-run")) {
     throw new Error("--json / --sample は --dry-run との併用時のみ指定できます");
   }
+  validateOrchestratorArgs(args);
+}
+
+const ORCHESTRATOR_FLAGS = [
+  "--result-json",
+  "--correlation-id",
+  "--attempt-id",
+  "--expected-job-id",
+] as const;
+const ORCHESTRATOR_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+
+function validateOrchestratorArgs(args: ParsedArgs): void {
+  const present = ORCHESTRATOR_FLAGS.filter((flag) => args.flags.has(flag));
+  if (present.length === 0) return;
+  if (present.length !== ORCHESTRATOR_FLAGS.length) {
+    throw new Error(`orchestrator モードの 4 フラグは全て指定してください（指定済み: ${present.join(", ")}）`);
+  }
+  if (args.command !== "run") throw new Error("orchestrator モードは run 専用です");
+  if (args.flags.has("--help") || args.flags.has("-h")) {
+    throw new Error("orchestrator モードは --help / -h と併用できません");
+  }
+  for (const flag of ["--correlation-id", "--attempt-id", "--expected-job-id"] as const) {
+    const value = stringFlag(args, flag);
+    if (value === undefined || !ORCHESTRATOR_ID_PATTERN.test(value)) {
+      throw new Error(`${flag} は ^[A-Za-z0-9._:-]{1,128}$ に一致する値を指定してください`);
+    }
+  }
+  const resultJson = stringFlag(args, "--result-json");
+  if (resultJson === undefined || resultJson.length === 0) throw new Error("--result-json は空にできません");
+  if (args.flags.has("--dry-run") || args.flags.has("--json") || args.flags.has("--sample")) {
+    throw new Error("orchestrator モードは --dry-run / --json / --sample と併用できません");
+  }
+  if (stringFlag(args, "--lock") === "local-only") {
+    throw new Error("orchestrator モードは --lock local-only と併用できません");
+  }
+  if (resultJson !== "-" && fs.existsSync(resultJson)) {
+    throw new Error(`Execution Result の出力先は既に存在します: ${resultJson}`);
+  }
 }
 
 function rejectConflict(args: ParsedArgs, flags: string[]): void {
@@ -141,6 +185,8 @@ const USAGE = `kSQL Flow — kintone バッチランナー (MIT, as-is)
   ksql-flow run -f <file.sql> [--profile p] [--as-of ISO8601] [--dry-run]
                 [--sample 1..50] [--json]
                 [--max-api-calls N] [--lock local-only] [--force-unlock]
+                [--result-json <path|-> --correlation-id <id>
+                 --attempt-id <id> --expected-job-id <id>]
   ksql-flow run-all <jobsDir> [--profile p] [--as-of ISO8601] [--dry-run]
                 [--sample 1..50] [--json]
                 [--resume | --resume-batch batch_id] [--from file.sql] [--only file.sql]
@@ -179,6 +225,15 @@ export async function main(argv: string[]): Promise<number> {
   try {
     validateArgs(args);
   } catch (error) {
+    const orchestrator = orchestratorOptionsFromArgs(args);
+    if (orchestrator !== null) {
+      return writeOrchestratorStartupFailure(
+        orchestrator,
+        stringFlag(args, "--profile") ?? "default",
+        error,
+        EXIT.VALIDATION
+      );
+    }
     console.error(`エラー: ${errorMessage(error)}`);
     console.error("使用方法を確認するには ksql-flow --help を実行してください");
     return EXIT.VALIDATION;
@@ -216,6 +271,15 @@ export async function main(argv: string[]): Promise<number> {
         const profile = loadProfile(args);
         const file = stringFlag(args, "-f") ?? stringFlag(args, "--file");
         if (!file) {
+          const orchestrator = orchestratorOptionsFromArgs(args);
+          if (orchestrator !== null) {
+            return writeOrchestratorStartupFailure(
+              orchestrator,
+              profile.name,
+              new Error("run には -f <file.sql> が必要です"),
+              EXIT.VALIDATION
+            );
+          }
           console.error("エラー: run には -f <file.sql> が必要です");
           return EXIT.VALIDATION;
         }
@@ -253,6 +317,15 @@ export async function main(argv: string[]): Promise<number> {
     }
   } catch (error) {
     const exitCode = (error as { exitCode?: number }).exitCode;
+    const orchestrator = orchestratorOptionsFromArgs(args);
+    if (orchestrator !== null) {
+      return writeOrchestratorStartupFailure(
+        orchestrator,
+        stringFlag(args, "--profile") ?? "default",
+        error,
+        typeof exitCode === "number" ? (exitCode as ExitCode) : EXIT.RUNTIME
+      );
+    }
     console.error(`エラー: ${errorMessage(error)}`);
     return typeof exitCode === "number" ? (exitCode as number) : EXIT.RUNTIME;
   }
@@ -269,6 +342,7 @@ function runOptionsFromArgs(args: ParsedArgs) {
   const maxApiCalls = stringFlag(args, "--max-api-calls");
   const sample = stringFlag(args, "--sample");
   const lock = stringFlag(args, "--lock");
+  const orchestrator = orchestratorOptionsFromArgs(args);
   if (lock !== undefined && lock !== "local-only") {
     throw Object.assign(new Error(`--lock の値が不正です: ${lock}（指定できるのは local-only のみ）`), {
       exitCode: EXIT.VALIDATION,
@@ -283,7 +357,29 @@ function runOptionsFromArgs(args: ParsedArgs) {
     json: boolFlag(args, "--json"),
     lockLocalOnly: lock === "local-only",
     forceUnlock: boolFlag(args, "--force-unlock"),
+    ...(orchestrator ?? {}),
   };
+}
+
+function orchestratorOptionsFromArgs(
+  args: ParsedArgs
+): Pick<OrchestratorRunOptions, "resultJson" | "correlationId" | "attemptId" | "expectedJobId" | "asOf"> | null {
+  const resultJson = stringFlag(args, "--result-json");
+  const correlationId = stringFlag(args, "--correlation-id");
+  const attemptId = stringFlag(args, "--attempt-id");
+  const expectedJobId = stringFlag(args, "--expected-job-id");
+  if (
+    resultJson === undefined ||
+    correlationId === undefined ||
+    attemptId === undefined ||
+    expectedJobId === undefined ||
+    !ORCHESTRATOR_ID_PATTERN.test(correlationId) ||
+    !ORCHESTRATOR_ID_PATTERN.test(attemptId) ||
+    !ORCHESTRATOR_ID_PATTERN.test(expectedJobId)
+  ) {
+    return null;
+  }
+  return { resultJson, correlationId, attemptId, expectedJobId, asOf: stringFlag(args, "--as-of") };
 }
 
 if (require.main === module) {

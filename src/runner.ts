@@ -17,6 +17,8 @@ export interface CreateEnvOptions {
   out?: (line: string) => void;
   dryRun?: boolean;
   json?: boolean;
+  /** Execution Contract の orchestrator モード。人間向け出力を stderr に固定する。 */
+  orchestrator?: boolean;
 }
 
 export interface RunnerEnvBundle extends RunnerEnv {
@@ -29,7 +31,11 @@ export function createRunnerEnv(profile: ResolvedProfile, options: CreateEnvOpti
   const batchId = options.batchId ?? crypto.randomUUID();
   const logHost = resolveLogHost();
   const masker = new SecretMasker(profile);
-  const out = options.out ?? ((line: string) => console.log(masker.mask(line)));
+  const out =
+    options.out ??
+    (options.orchestrator === true
+      ? (line: string) => console.error(masker.mask(line))
+      : (line: string) => console.log(masker.mask(line)));
   const jsonl = new JsonlLogger(profile.logging.localDir, batchId, profile.name, masker);
   const pending = new PendingQueue(profile.logging.localDir, masker);
 

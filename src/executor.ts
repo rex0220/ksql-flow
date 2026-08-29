@@ -48,6 +48,10 @@ export interface RunJobParams {
   /** ジョブ timeout とバッチ残り時間の小さい方（ms）。null なら無制限 */
   timeoutMs: number | null;
   jobKey: string;
+  /** 最初の executeStatement の直前。M1-d の耐久 EXECUTION_STARTED もこの挿入点を使う。 */
+  onExecutionStart?: (startedAt: Date) => void | Promise<void>;
+  /** Execution Result 境界へ分類材料を渡す観測フック。既存の結果・ログには影響させない。 */
+  onExecutionError?: (cause: unknown, code?: string) => void;
 }
 
 // package.json の version を正とする（ハードコードだと npm version 更新に追随できず、
@@ -230,7 +234,15 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
     let failure: { message: string; exitCode: number } | null = null;
     let abortMessage: string | null = null;
     let previousMetrics: ExecutionMetrics | null = null;
+    let executionStartNotified = false;
     for (const [index, statement] of job.parsed.statements.entries()) {
+      if (!executionStartNotified) {
+        executionStartNotified = true;
+        if (params.onExecutionStart !== undefined) {
+          const executionStartedAt = new Date();
+          await params.onExecutionStart(executionStartedAt);
+        }
+      }
       const result = await executeStatement(statement, context);
       const statementMetrics = metricsDelta(result.metrics, previousMetrics);
       const statementWrittenCount = writtenRows(result);
@@ -269,6 +281,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
         break;
       }
       const cause = result.error?.cause ?? result.error;
+      reportExecutionError(params, cause, result.error?.code);
       const classified = classifyRuntimeError(cause);
       failure = {
         message: result.error?.message ?? "実行エラー",
@@ -296,6 +309,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
     }
   } catch (error) {
     // createExecutionContext / executeStatement の同期系エラー
+    reportExecutionError(params, error, errorCode(error));
     status = "FAILED";
     exitCode = classifyRuntimeError(error);
     errorText = errorMessage(error);
@@ -353,6 +367,20 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
     apiCalls: apiCallsJob,
     lastWrittenKey: writeChunks > 0 ? lastWrittenKey ?? `chunk:${writeChunks}` : undefined,
   };
+}
+
+function reportExecutionError(params: RunJobParams, cause: unknown, code?: string): void {
+  try {
+    params.onExecutionError?.(cause, code);
+  } catch {
+    /* 観測フックの失敗で executor の既存結果を変えない */
+  }
+}
+
+function errorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
 }
 
 function safeUser(): string {

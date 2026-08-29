@@ -1,9 +1,21 @@
+import * as crypto from "crypto";
+import * as fs from "fs";
+import { version as engineVersion } from "@rex0220/kintone-sql-tools/flow";
 import { appIdMap, ResolvedProfile } from "../config";
-import { ApiLimitError, errorMessage, LockedError, LockUnavailableError } from "../errors";
-import { runJob } from "../executor";
+import {
+  ApiLimitError,
+  classifyRuntimeError,
+  ConfigError,
+  errorMessage,
+  LockedError,
+  LockUnavailableError,
+} from "../errors";
+import { normalizeJobOutcome, RuntimeFailureKind, writeExecutionResult } from "../contract";
+import { runJob, RUNNER_VERSION } from "../executor";
 import { loadJobFile } from "../jobs";
 import { buildJobKey } from "../jobkey";
 import { LocalLock } from "../lock";
+import { SecretMasker } from "../logging/mask";
 import { notifyFailure, notifyHeartbeat } from "../notify";
 import { createRunnerEnv, effectiveTimeoutMs, parseAsOf, RunnerEnvBundle } from "../runner";
 import { EXIT, ExitCode, JobOutcome } from "../types";
@@ -23,6 +35,17 @@ export interface RunOptions {
   out?: (line: string) => void;
   /** 通知の fetch 差し替え（テスト用） */
   notifyFetch?: typeof fetch;
+  resultJson?: string;
+  correlationId?: string;
+  attemptId?: string;
+  expectedJobId?: string;
+}
+
+export interface OrchestratorRunOptions extends RunOptions {
+  resultJson: string;
+  correlationId: string;
+  attemptId: string;
+  expectedJobId: string;
 }
 
 /** 単一ジョブ実行（タスク指示書 C / M2） */
@@ -30,6 +53,21 @@ export async function runCommand(
   profile: ResolvedProfile,
   filePath: string,
   options: RunOptions = {}
+): Promise<ExitCode> {
+  if (hasAnyOrchestratorOption(options)) {
+    if (!hasCompleteOrchestratorOptions(options)) {
+      (options.out ?? console.error)("エラー: orchestrator モードの 4 フラグは全て指定してください");
+      return EXIT.VALIDATION;
+    }
+    return runOrchestratedCommand(profile, filePath, options);
+  }
+  return runStandaloneCommand(profile, filePath, options);
+}
+
+async function runStandaloneCommand(
+  profile: ResolvedProfile,
+  filePath: string,
+  options: RunOptions
 ): Promise<ExitCode> {
   let env: RunnerEnvBundle;
   try {
@@ -163,6 +201,277 @@ export async function runCommand(
   );
 
   return outcome.exitCode;
+}
+
+const ORCHESTRATOR_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+
+function hasAnyOrchestratorOption(options: RunOptions): boolean {
+  return (
+    options.resultJson !== undefined ||
+    options.correlationId !== undefined ||
+    options.attemptId !== undefined ||
+    options.expectedJobId !== undefined
+  );
+}
+
+function hasCompleteOrchestratorOptions(options: RunOptions): options is OrchestratorRunOptions {
+  return (
+    typeof options.resultJson === "string" &&
+    typeof options.correlationId === "string" &&
+    typeof options.attemptId === "string" &&
+    typeof options.expectedJobId === "string"
+  );
+}
+
+function validateOrchestratorOptions(profile: ResolvedProfile, options: OrchestratorRunOptions): void {
+  if (options.resultJson.length === 0) throw new ConfigError("--result-json は空にできません");
+  for (const [flag, value] of [
+    ["--correlation-id", options.correlationId],
+    ["--attempt-id", options.attemptId],
+    ["--expected-job-id", options.expectedJobId],
+  ] as const) {
+    if (!ORCHESTRATOR_ID_PATTERN.test(value)) {
+      throw new ConfigError(`${flag} は ^[A-Za-z0-9._:-]{1,128}$ に一致する値を指定してください`);
+    }
+  }
+  if (options.dryRun === true || options.json === true || options.sample !== undefined) {
+    throw new ConfigError("orchestrator モードは --dry-run / --json / --sample と併用できません");
+  }
+  if (options.lockLocalOnly === true) {
+    throw new ConfigError("orchestrator モードは --lock local-only と併用できません");
+  }
+  if (profile.logApp === undefined) {
+    throw new ConfigError("orchestrator モードには logApp の設定が必要です");
+  }
+  if (options.resultJson !== "-" && fs.existsSync(options.resultJson)) {
+    throw new ConfigError(`Execution Result の出力先は既に存在します: ${options.resultJson}`);
+  }
+}
+
+/**
+ * Execution Contract v1 の単一 run。standalone 経路へ出力規律や終了処理を波及させないため分離する。
+ */
+async function runOrchestratedCommand(
+  profile: ResolvedProfile,
+  filePath: string,
+  options: OrchestratorRunOptions
+): Promise<ExitCode> {
+  const executionId = crypto.randomUUID();
+  const fallbackMasker = new SecretMasker(profile);
+  let out = options.out ?? ((line: string) => console.error(fallbackMasker.mask(line)));
+  let env: RunnerEnvBundle | null = null;
+  let localLock: LocalLock | null = null;
+  let lockAcquired = false;
+  let outcome: JobOutcome | null = null;
+  let cause: unknown;
+  let failureKind: RuntimeFailureKind | undefined;
+  let diagnosticCode: string | undefined;
+  let observedExecutionErrorCode: string | undefined;
+  let asOf: Date | null = null;
+  let asOfEcho: string = options.asOf ?? new Date().toISOString();
+  let executionStarted = false;
+  let executionStartedAt: Date | null = null;
+  let ranJob = false;
+
+  try {
+    validateOrchestratorOptions(profile, options);
+    env = createRunnerEnv(profile, {
+      batchId: executionId,
+      maxApiCallsOverride: options.maxApiCalls,
+      baseFetch: options.baseFetch,
+      out: options.out,
+      orchestrator: true,
+    });
+    out = env.out;
+
+    const job = loadJobFile(filePath, appIdMap(profile));
+    if (job.name !== options.expectedJobId) {
+      throw new ConfigError(
+        `--expected-job-id がジョブ論理名と一致しません: expected=${options.expectedJobId}, actual=${job.name}`
+      );
+    }
+    const jobKey = buildJobKey(profile.name, job.name);
+    asOf = parseAsOf(options.asOf);
+    asOfEcho = options.asOf ?? asOf.toISOString();
+
+    out(`[RUN] ${job.fileName} (profile: ${profile.name}, as-of: ${asOf.toISOString()})`);
+    localLock = new LocalLock(process.cwd(), profile.name);
+    localLock.acquire(env.batchId, profile.limits.batchTimeoutSec);
+    lockAcquired = true;
+
+    try {
+      await env.logApp!.resendPending();
+    } catch (error) {
+      out(`  警告: 未送信ログの再送に失敗しました: ${errorMessage(error)}`);
+    }
+
+    const batchDeadline =
+      profile.limits.batchTimeoutSec !== null ? Date.now() + profile.limits.batchTimeoutSec * 1000 : null;
+    ranJob = true;
+    outcome = await runJob(env, {
+      job,
+      asOf,
+      batchId: env.batchId,
+      timeoutMs: effectiveTimeoutMs(job.timeoutSec, batchDeadline),
+      jobKey,
+      onExecutionStart: (startedAt) => {
+        executionStarted = true;
+        executionStartedAt = startedAt;
+      },
+      onExecutionError: (error, code) => {
+        cause = error;
+        if (code !== undefined) observedExecutionErrorCode = code;
+      },
+    });
+
+    if (!executionStarted && outcome.exitCode === EXIT.VALIDATION) {
+      diagnosticCode = job.parsed.diagnostics.find((item) => item.severity === "error")?.code;
+    } else if (executionStarted && outcome.exitCode === EXIT.VALIDATION) {
+      diagnosticCode = observedExecutionErrorCode;
+    }
+    if (executionStarted && outcome.status === "FAILED" && outcome.exitCode === EXIT.RUNTIME && cause === undefined) {
+      // runJob が Exit 3 に分類した実行中失敗は HTTP／ネットワーク／API 上限系。
+      failureKind = "API_ERROR";
+    }
+
+    printOutcome(out, outcome);
+    if (outcome.status === "FAILED" || outcome.status === "ABORTED" || outcome.status === "TIMEOUT") {
+      await notifyFailure(
+        profile,
+        env.masker,
+        {
+          kind: "job",
+          batchId: env.batchId,
+          status: outcome.status,
+          exitCode: outcome.exitCode,
+          asOf: asOf.toISOString(),
+          jobs: [outcome],
+        },
+        { fetchImpl: options.notifyFetch, out }
+      );
+    }
+    await notifyHeartbeat(
+      profile,
+      env.masker,
+      { batchId: env.batchId, status: outcome.status },
+      { fetchImpl: options.notifyFetch, out }
+    );
+  } catch (error) {
+    cause = error;
+    const exitCode = orchestratorExitCode(error, ranJob);
+    if (error instanceof LockedError) {
+      outcome = syntheticOutcome(options.expectedJobId, filePath, "LOCKED", EXIT.LOCKED, errorMessage(error));
+    } else {
+      outcome = syntheticOutcome(options.expectedJobId, filePath, "FAILED", exitCode, errorMessage(error));
+      if (error instanceof LockUnavailableError) failureKind = "LOCK_UNAVAILABLE";
+      else if (exitCode === EXIT.RUNTIME) failureKind = "INTERNAL_ERROR";
+    }
+    out(`エラー: ${errorMessage(error)}`);
+  } finally {
+    if (lockAcquired) localLock?.release();
+  }
+
+  const finalOutcome = outcome ?? syntheticOutcome(
+    options.expectedJobId,
+    filePath,
+    "FAILED",
+    EXIT.RUNTIME,
+    "Execution Result を構築できませんでした"
+  );
+  const finishedAt = new Date();
+  const result = normalizeJobOutcome(finalOutcome, {
+    correlationId: options.correlationId,
+    attemptId: options.attemptId,
+    executionId,
+    profile: profile.name,
+    asOf: asOfEcho,
+    executionStarted,
+    startedAt: executionStartedAt,
+    finishedAt,
+    lastSuccessfulChunkNo: null,
+    ksqlFlowVersion: RUNNER_VERSION,
+    engineVersion,
+    failureKind,
+    cause,
+    error: {
+      ...(diagnosticCode !== undefined ? { code: diagnosticCode } : {}),
+      ...(finalOutcome.errorMessage !== undefined ? { message: finalOutcome.errorMessage } : {}),
+    },
+    masker: env?.masker ?? fallbackMasker,
+  });
+
+  try {
+    writeExecutionResult(options.resultJson, result);
+  } catch (error) {
+    out(`エラー: Execution Result を出力できません: ${errorMessage(error)}`);
+  }
+  return result.exitCode;
+}
+
+function orchestratorExitCode(error: unknown, ranJob: boolean): ExitCode {
+  if (error instanceof LockedError) return EXIT.LOCKED;
+  if (error instanceof ConfigError) return EXIT.VALIDATION;
+  if (error instanceof LockUnavailableError || error instanceof ApiLimitError) return EXIT.RUNTIME;
+  if (ranJob) return classifyRuntimeError(error);
+  return EXIT.RUNTIME;
+}
+
+function syntheticOutcome(
+  jobName: string,
+  filePath: string,
+  status: JobOutcome["status"],
+  exitCode: ExitCode,
+  message: string
+): JobOutcome {
+  return {
+    jobName,
+    scriptName: filePath,
+    status,
+    exitCode,
+    errorMessage: message,
+    finishedAt: new Date(),
+    readCount: 0,
+    writtenCount: 0,
+    deletedCount: 0,
+    apiCalls: 0,
+    detailLines: [],
+  };
+}
+
+/** config 読込など runCommand 到達前の controlled failure を schema-valid な結果へ変換する。 */
+export function writeOrchestratorStartupFailure(
+  options: Pick<OrchestratorRunOptions, "resultJson" | "correlationId" | "attemptId" | "expectedJobId" | "asOf">,
+  profileName: string,
+  error: unknown,
+  exitCode: ExitCode = EXIT.VALIDATION
+): ExitCode {
+  const executionId = crypto.randomUUID();
+  const finishedAt = new Date();
+  const outcome = syntheticOutcome(options.expectedJobId, "", "FAILED", exitCode, errorMessage(error));
+  const result = normalizeJobOutcome(outcome, {
+    correlationId: options.correlationId,
+    attemptId: options.attemptId,
+    executionId,
+    profile: profileName,
+    asOf: options.asOf ?? finishedAt.toISOString(),
+    executionStarted: false,
+    startedAt: null,
+    finishedAt,
+    lastSuccessfulChunkNo: null,
+    ksqlFlowVersion: RUNNER_VERSION,
+    engineVersion,
+    ...(exitCode === EXIT.RUNTIME ? { failureKind: "INTERNAL_ERROR" as const } : {}),
+    cause: error,
+    error: { message: errorMessage(error) },
+    masker: { mask: (value) => value },
+  });
+  console.error(`エラー: ${errorMessage(error)}`);
+  try {
+    writeExecutionResult(options.resultJson, result);
+  } catch (writeError) {
+    console.error(`エラー: Execution Result を出力できません: ${errorMessage(writeError)}`);
+  }
+  return result.exitCode;
 }
 
 export function printOutcome(out: (line: string) => void, outcome: JobOutcome): void {
