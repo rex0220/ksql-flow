@@ -117,7 +117,7 @@ describe("JobOutcome to Execution Result normalization", () => {
     { label: "API_ERROR", outcome: outcome("FAILED", EXIT.RUNTIME), started: true, expected: { status: "FAILED", resultCode: "API_ERROR", exitCode: 3 }, category: "API" },
     { label: "LOCK_UNAVAILABLE", outcome: outcome("FAILED", EXIT.RUNTIME), started: false, expected: { status: "FAILED", resultCode: "LOCK_UNAVAILABLE", exitCode: 3 }, category: "LOCK" },
     { label: "INTERNAL_ERROR", outcome: outcome("FAILED", EXIT.RUNTIME), started: true, failureKind: "INTERNAL_ERROR", expected: { status: "FAILED", resultCode: "INTERNAL_ERROR", exitCode: 3 }, category: "INTERNAL" },
-    { label: "CANCELLED", outcome: outcome("FAILED", EXIT.RUNTIME), started: true, failureKind: "CANCELLED", expected: { status: "CANCELLED", resultCode: "CANCELLED", exitCode: 3 }, category: "CANCELLED" },
+    { label: "CANCELLED", outcome: outcome("CANCELLED", EXIT.RUNTIME), started: true, expected: { status: "CANCELLED", resultCode: "CANCELLED", exitCode: 3 }, category: "CANCELLED" },
     { label: "LOCK_CONFLICT", outcome: outcome("LOCKED", EXIT.LOCKED), started: false, expected: { status: "FAILED", resultCode: "LOCK_CONFLICT", exitCode: 5 }, category: "LOCK" },
   ];
 
@@ -146,6 +146,12 @@ describe("JobOutcome to Execution Result normalization", () => {
       true,
       1,
     ]);
+  });
+
+  test("旧 failureKind=CANCELLED 経路も同じ CANCELLED 結果へ正規化する", () => {
+    const result = normalizeJobOutcome(outcome("FAILED", EXIT.RUNTIME), context(true, "CANCELLED"));
+    expect(result).toMatchObject({ status: "CANCELLED", resultCode: "CANCELLED", exitCode: 3 });
+    expectSchemaValid(result);
   });
 
   test.each([

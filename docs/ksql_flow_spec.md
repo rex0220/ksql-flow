@@ -695,7 +695,7 @@ CLI はコマンドごとの flag allowlist を持ちます。未知 flag、そ�
 | `0` | 正常終了（`NO_DATA` による正常スキップを含む） | `SUCCESS` / `NO_DATA` |
 | `1` | 検証エラー（SQL 構文、論理名未定義、updateKey 制約違反、設定不備） | `FAILED` |
 | `2` | 業務アサート違反による安全停止 | `ABORTED` |
-| `3` | 実行時エラー（API・認証・ネットワーク・タイムアウト） | `FAILED` / `TIMEOUT` |
+| `3` | 実行時エラー（API・認証・ネットワーク・タイムアウト）、graceful cancel 完了 | `FAILED` / `TIMEOUT` / `CANCELLED` |
 | `4` | 部分成功（`--continue-on-error` で一部ジョブが失敗） | 混在 |
 | `5` | 多重起動検知によるスキップ | `LOCKED` |
 
@@ -705,6 +705,10 @@ CLI はコマンドごとの flag allowlist を持ちます。未知 flag、そ�
   3. それ以外（失敗のみ、または既定 / `--stop-on-error` での中断）→ 失敗ジョブの**最も重大なコード**（優先順位 **3 > 2 > 5 > 1**）。
 * run-all 開始時のバッチロック取得失敗（5.5-3）は何も実行せず **5** を返します。run-all 実行中に単発実行と個別ジョブのロックが衝突した場合、当該ジョブは `SKIPPED`（理由 LOCKED）とし、集約規則では 5 として扱います。
 * CI / スケジューラ側はこのコードで分岐できます（例: Exit 2 は業務データ起因なので担当部門へ、Exit 3 は基盤起因なので情シスへ通知）。
+
+単一 `run` の実行中は `SIGINT` / `SIGTERM` / `SIGBREAK` を捕捉します。1 回目は、進行中の API request の完了を待ち、次の SQL 文または次の書込 chunk を開始せず、結果とログの確定後にロックを解放して `CANCELLED`（Exit 3）を返します。2 回目は forced termination として即時終了し、Execution Result JSON を保証しません。利用者起因の `CANCELLED` では `onFailure` 通知を送らず、heartbeat は `on: "always"` の場合だけ送ります。
+
+Windows では Ctrl+C（`SIGINT`）と CTRL_BREAK（`SIGBREAK`）を捕捉できますが、`SIGTERM` は Windows プロセスへ配送されません。Unix では `SIGINT` / `SIGTERM` を捕捉します。`run-all` は graceful cancel の対象外で、従来の signal 挙動を維持します。
 
 ---
 

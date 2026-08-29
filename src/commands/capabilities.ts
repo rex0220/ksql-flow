@@ -21,7 +21,7 @@ export function capabilitiesCommand(): ExitCode {
       describeProfile: true,
       inspectJob: true,
       durableExecutionStarted: true,
-      gracefulCancel: false,
+      gracefulCancel: true,
       jobLockProtocol: "profile-job-v0",
     },
   });

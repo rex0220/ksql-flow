@@ -202,7 +202,10 @@ export function normalizeJobOutcome(
 
 function resolveDisposition(outcome: JobOutcome, context: NormalizeExecutionResultContext): ResolvedDisposition {
   if (context.failureKind === "CANCELLED") {
-    requireOutcome(outcome, "FAILED", EXIT.RUNTIME, "CANCELLED");
+    if (outcome.status !== "CANCELLED" && outcome.status !== "FAILED") {
+      throw invalidOutcome(outcome, "CANCELLED は CANCELLED または旧 FAILED 経路からのみ生成できます");
+    }
+    requireExit(outcome, EXIT.RUNTIME);
     return { status: "CANCELLED", resultCode: "CANCELLED", exitCode: EXIT.RUNTIME };
   }
 
@@ -223,6 +226,9 @@ function resolveDisposition(outcome: JobOutcome, context: NormalizeExecutionResu
       requireExit(outcome, EXIT.RUNTIME);
       requireExecutionStarted(context, "EXECUTION_TIMEOUT");
       return { status: "FAILED", resultCode: "EXECUTION_TIMEOUT", exitCode: EXIT.RUNTIME };
+    case "CANCELLED":
+      requireExit(outcome, EXIT.RUNTIME);
+      return { status: "CANCELLED", resultCode: "CANCELLED", exitCode: EXIT.RUNTIME };
     case "LOCKED":
       requireExit(outcome, EXIT.LOCKED);
       requireExecutionNotStarted(context, "LOCK_CONFLICT");

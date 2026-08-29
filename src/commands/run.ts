@@ -2,6 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import { version as engineVersion } from "@rex0220/kintone-sql-tools/flow";
 import { appIdMap, ResolvedProfile } from "../config";
+import { type CancellationToken, withGracefulCancellation } from "../cancellation";
 import {
   ApiLimitError,
   classifyRuntimeError,
@@ -60,15 +61,22 @@ export async function runCommand(
       (options.out ?? console.error)("エラー: orchestrator モードの 4 フラグは全て指定してください");
       return EXIT.VALIDATION;
     }
-    return runOrchestratedCommand(profile, filePath, options);
+    return withGracefulCancellation((cancellation) =>
+      runOrchestratedCommand(profile, filePath, options, cancellation)
+    );
   }
-  return runStandaloneCommand(profile, filePath, options);
+  // dry-run は KF-05 の対象外。signal handler を登録せず従来挙動を維持する。
+  if (options.dryRun === true) return runStandaloneCommand(profile, filePath, options);
+  return withGracefulCancellation((cancellation) =>
+    runStandaloneCommand(profile, filePath, options, cancellation)
+  );
 }
 
 async function runStandaloneCommand(
   profile: ResolvedProfile,
   filePath: string,
-  options: RunOptions
+  options: RunOptions,
+  cancellation?: CancellationToken
 ): Promise<ExitCode> {
   let env: RunnerEnvBundle;
   try {
@@ -156,6 +164,7 @@ async function runStandaloneCommand(
       batchId: env.batchId,
       timeoutMs: effectiveTimeoutMs(job.timeoutSec, batchDeadline),
       jobKey,
+      cancellation,
     });
   } catch (error) {
     if (error instanceof LockedError) {
@@ -255,7 +264,8 @@ function validateOrchestratorOptions(profile: ResolvedProfile, options: Orchestr
 async function runOrchestratedCommand(
   profile: ResolvedProfile,
   filePath: string,
-  options: OrchestratorRunOptions
+  options: OrchestratorRunOptions,
+  cancellation: CancellationToken
 ): Promise<ExitCode> {
   const executionId = crypto.randomUUID();
   const fallbackMasker = new SecretMasker(profile);
@@ -273,6 +283,7 @@ async function runOrchestratedCommand(
   let executionStarted = false;
   let executionStartedAt: Date | null = null;
   let ranJob = false;
+  let completedJob = false;
 
   try {
     validateOrchestratorOptions(profile, options);
@@ -332,7 +343,9 @@ async function runOrchestratedCommand(
         cause = error;
         if (code !== undefined) observedExecutionErrorCode = code;
       },
+      cancellation,
     });
+    completedJob = true;
 
     if (!executionStarted && outcome.exitCode === EXIT.VALIDATION) {
       diagnosticCode = job.parsed.diagnostics.find((item) => item.severity === "error")?.code;
@@ -343,7 +356,24 @@ async function runOrchestratedCommand(
       // runJob が Exit 3 に分類した実行中失敗は HTTP／ネットワーク／API 上限系。
       failureKind = "API_ERROR";
     }
+    if (outcome.status === "CANCELLED") failureKind = "CANCELLED";
+  } catch (error) {
+    cause = error;
+    const exitCode = orchestratorExitCode(error, ranJob);
+    if (error instanceof LockedError) {
+      outcome = syntheticOutcome(options.expectedJobId, filePath, "LOCKED", EXIT.LOCKED, errorMessage(error));
+    } else {
+      outcome = syntheticOutcome(options.expectedJobId, filePath, "FAILED", exitCode, errorMessage(error));
+      if (error instanceof LockUnavailableError) failureKind = "LOCK_UNAVAILABLE";
+      else if (exitCode === EXIT.RUNTIME) failureKind = "INTERNAL_ERROR";
+    }
+    out(`エラー: ${errorMessage(error)}`);
+  } finally {
+    if (lockAcquired) localLock?.release();
+  }
 
+  // runJob が finishRecord / JSONL を確定し、上の finally がロックを解放した後に結果を出す。
+  if (completedJob && outcome !== null && env !== null && asOf !== null) {
     printOutcome(out, outcome);
     if (outcome.status === "FAILED" || outcome.status === "ABORTED" || outcome.status === "TIMEOUT") {
       await notifyFailure(
@@ -360,25 +390,13 @@ async function runOrchestratedCommand(
         { fetchImpl: options.notifyFetch, out }
       );
     }
+    // CANCELLED は heartbeat: always の場合だけ notifyHeartbeat 側で送信される。
     await notifyHeartbeat(
       profile,
       env.masker,
       { batchId: env.batchId, status: outcome.status },
       { fetchImpl: options.notifyFetch, out }
     );
-  } catch (error) {
-    cause = error;
-    const exitCode = orchestratorExitCode(error, ranJob);
-    if (error instanceof LockedError) {
-      outcome = syntheticOutcome(options.expectedJobId, filePath, "LOCKED", EXIT.LOCKED, errorMessage(error));
-    } else {
-      outcome = syntheticOutcome(options.expectedJobId, filePath, "FAILED", exitCode, errorMessage(error));
-      if (error instanceof LockUnavailableError) failureKind = "LOCK_UNAVAILABLE";
-      else if (exitCode === EXIT.RUNTIME) failureKind = "INTERNAL_ERROR";
-    }
-    out(`エラー: ${errorMessage(error)}`);
-  } finally {
-    if (lockAcquired) localLock?.release();
   }
 
   const finalOutcome = outcome ?? syntheticOutcome(

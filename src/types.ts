@@ -7,6 +7,7 @@ export type JobStatus =
   | "SKIPPED"
   | "RUNNING"
   | "TIMEOUT"
+  | "CANCELLED"
   | "LOCKED";
 
 /** Exit Codes（設計書 10.3） */

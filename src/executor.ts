@@ -14,6 +14,7 @@ import {
   type StatementResult,
 } from "@rex0220/kintone-sql-tools/flow";
 import { ResolvedProfile } from "./config";
+import { CancelledError, type CancellationToken } from "./cancellation";
 import { classifyRuntimeError, errorMessage, LockedError, LockUnavailableError } from "./errors";
 import { HttpLayer } from "./http";
 import { JobFile, MAX_STATEMENTS } from "./jobs";
@@ -56,6 +57,8 @@ export interface RunJobParams {
   onExecutionError?: (cause: unknown, code?: string) => void;
   /** orchestrator 実行の JOB レコードにだけ保存する相関値。 */
   correlation?: { correlationId: string; attemptId: string };
+  /** 単一 run の cooperative cancel。run-all は渡さないため従来挙動のまま。 */
+  cancellation?: CancellationToken;
 }
 
 // package.json の version を正とする（ハードコードだと npm version 更新に追随できず、
@@ -217,6 +220,10 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
       // エンジンは callback を await する。ログアプリ I/O は間引き時だけ待つ。
       await logApp.updateCheckpoint(id, fields);
     }
+    // callback はエンジンが await する。完了済み chunk を記録してから例外で次 chunk を止める。
+    if (cancellationRequested(params.cancellation)) {
+      throw new CancelledError(params.cancellation?.signal ?? null);
+    }
   };
 
   let status: JobStatus = "SUCCESS";
@@ -243,9 +250,14 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
     let sawTimeout = false;
     let failure: { message: string; exitCode: number } | null = null;
     let abortMessage: string | null = null;
+    let cancelled = false;
     let previousMetrics: ExecutionMetrics | null = null;
     let executionStartNotified = false;
     for (const [index, statement] of job.parsed.statements.entries()) {
+      if (cancellationRequested(params.cancellation)) {
+        cancelled = true;
+        break;
+      }
       if (!executionStartNotified) {
         executionStartNotified = true;
         // kintone DATETIME はミリ秒を保持しない。結果 JSON と耐久値を同一時点にするため、
@@ -266,6 +278,11 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
         }
         if (params.onExecutionStart !== undefined) {
           await params.onExecutionStart(executionStartedAt);
+        }
+        // EXECUTION_STARTED の永続化中に signal が来た場合も最初の SQL 文を開始しない。
+        if (cancellationRequested(params.cancellation)) {
+          cancelled = true;
+          break;
         }
       }
       const result = await executeStatement(statement, context);
@@ -290,6 +307,11 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
       });
       writtenCount += statementWrittenCount;
       deletedCount += statementDeletedCount;
+      // 進行中 request の完了と結果記録を待ってから、次の文へ進まず停止する。
+      if (cancellationRequested(params.cancellation)) {
+        cancelled = true;
+        break;
+      }
       if (result.status === "success") {
         if (result.kind === "EXIT_NO_DATA") sawNoData = true;
         continue;
@@ -316,7 +338,11 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
       break;
     }
 
-    if (abortMessage !== null) {
+    if (cancelled) {
+      status = "CANCELLED";
+      exitCode = EXIT.RUNTIME;
+      errorText = cancellationMessage(params.cancellation);
+    } else if (abortMessage !== null) {
       status = "ABORTED";
       exitCode = EXIT.ABORTED;
       errorText = abortMessage;
@@ -334,10 +360,16 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
     }
   } catch (error) {
     // createExecutionContext / executeStatement の同期系エラー
-    reportExecutionError(params, error, errorCode(error));
-    status = "FAILED";
-    exitCode = classifyRuntimeError(error);
-    errorText = errorMessage(error);
+    if (error instanceof CancelledError || cancellationRequested(params.cancellation)) {
+      status = "CANCELLED";
+      exitCode = EXIT.RUNTIME;
+      errorText = cancellationMessage(params.cancellation);
+    } else {
+      reportExecutionError(params, error, errorCode(error));
+      status = "FAILED";
+      exitCode = classifyRuntimeError(error);
+      errorText = errorMessage(error);
+    }
   } finally {
     if (context !== null) {
       try {
@@ -393,6 +425,16 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
     lastWrittenKey: writeChunks > 0 ? lastWrittenKey ?? `chunk:${writeChunks}` : undefined,
     writeChunks,
   };
+}
+
+function cancellationMessage(token: CancellationToken | undefined): string {
+  return token?.signal === null || token?.signal === undefined
+    ? "実行をキャンセルしました"
+    : `${token.signal} を受信したため実行をキャンセルしました`;
+}
+
+function cancellationRequested(token: CancellationToken | undefined): boolean {
+  return token?.requested === true;
 }
 
 function reportExecutionError(params: RunJobParams, cause: unknown, code?: string): void {
