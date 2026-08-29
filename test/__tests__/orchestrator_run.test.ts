@@ -4,6 +4,7 @@ import Ajv2020 from "ajv/dist/2020";
 import { runCommand } from "../../src/commands/run";
 import { writeExecutionResult, type ExecutionResult } from "../../src/contract";
 import { toKintoneDateTime } from "../../src/logapp";
+import { createRunnerEnv } from "../../src/runner";
 import { EXIT } from "../../src/types";
 import { AS_OF, buildWorld, logRecords, SAMPLE_JOB, type TestWorld, writeJob } from "../helpers/world";
 
@@ -41,6 +42,15 @@ function options(resultJson: string, patch: Record<string, unknown> = {}) {
     ...patch,
   };
 }
+
+test("markExecutionStarted は writableFields で耐久 marker が欠落した場合 no-op にしない", async () => {
+  world = buildWorld({ withOrchestratorFields: false });
+  const env = createRunnerEnv(world.profile, { baseFetch: world.mock.fetch, out: world.out });
+  await expect(env.logApp?.markExecutionStarted("1", new Date(AS_OF))).rejects.toThrow(
+    /EXECUTION_STARTED.*確認できない/
+  );
+  expect(world.mock.requests.some((request) => request.method === "PUT")).toBe(false);
+});
 
 function readResult(file: string): ExecutionResult {
   const bytes = fs.readFileSync(file);

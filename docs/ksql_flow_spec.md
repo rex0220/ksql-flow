@@ -647,9 +647,18 @@ ksql run-all ./jobs/ --profile prod --resume-batch <batch_id>
 # ハングした前回セッションのロック解除
 # 同一 profile の全 RUNNING が対象。解除前に jobKey / 開始時刻 / 件数を表示
 ksql unlock --profile prod
+
+# Execution Contract 対応状況（config・通信不要）
+ksql-flow capabilities --json
+
+# 解決済み profile の非秘密情報（canonical JSON）
+ksql-flow describe-profile --profile prod --config ./ksql.config.json --json
+
+# 論理 job ID・engine 診断・検出可能な非決定要素の静的検査
+ksql-flow inspect-job -f jobs/01_sync_master.sql --profile prod --config ./ksql.config.json --json
 ```
 
-CLI はコマンドごとの flag allowlist を持ちます。未知 flag、そのコマンドに不適用な flag、余分な positional、競合 flag は設定ファイル読取・API 呼び出し・ファイル変更より前に usage error（Exit 1）です。`--resume` / `--resume-batch` / `--from` / `--only` は相互排他、`--stop-on-error` / `--continue-on-error` は相互排他です。`--json` / `--sample` は `--dry-run` 併用時のみ、`--check-logapp` は `validate` でのみ受理します。
+CLI はコマンドごとの flag allowlist を持ちます。未知 flag、そのコマンドに不適用な flag、余分な positional、競合 flag は設定ファイル読取・API 呼び出し・ファイル変更より前に usage error（Exit 1）です。`--resume` / `--resume-batch` / `--from` / `--only` は相互排他、`--stop-on-error` / `--continue-on-error` は相互排他です。`run` / `run-all` の `--json` / `--sample` は `--dry-run` 併用時のみ、`capabilities` / `describe-profile` / `inspect-job` は `--json` 必須、`--check-logapp` は `validate` でのみ受理します。これら 3 つの JSON コマンドは kintone 通信を行わず、stdout へ JSON object 1 個と LF だけを出力します。`describe-profile` は全階層のキーを辞書順にした空白なしの canonical JSON で、認証情報を含みません。`inspect-job` の診断 code はエンジン公開 code をそのまま返し、静的検査だけで冪等性を証明しません。
 
 ### 10.2 dry-run の出力仕様（差分プレビュー）
 

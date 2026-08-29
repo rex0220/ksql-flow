@@ -9,6 +9,8 @@ import { stripSqlLiterals, type SecretMasker } from "../logging/mask";
 import { EXIT, type JobOutcome } from "../types";
 
 export const EXECUTION_CONTRACT = "ksql-flow.execution/v1" as const;
+export const EXECUTION_RESULT_SCHEMA_ID =
+  "https://github.com/rex0220/ksql-flow/blob/main/schema/execution-result-v1.schema.json" as const;
 export const EXECUTION_RESULT_FORMAT_VERSION = 1 as const;
 export const EXECUTION_RESULT_KIND = "EXECUTION_RESULT" as const;
 export const EXECUTION_ERROR_MESSAGE_MAX_LENGTH = 2_000;

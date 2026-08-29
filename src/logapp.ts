@@ -304,6 +304,7 @@ export class LogAppClient {
     const value = toKintoneDateTime(startedAt);
     try {
       const compatible = await this.writableFields({ runner_execution_started_at: value });
+      if (!("runner_execution_started_at" in compatible)) throw new Error("runner_execution_started_at is not writable");
       await this.client.putRecords({
         app: this.appId,
         records: [{

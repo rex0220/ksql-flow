@@ -2,13 +2,16 @@
 import * as fs from "fs";
 import { loadConfig } from "./config";
 import { EXIT, type ExitCode } from "./types";
-import { errorMessage } from "./errors";
+import { ConfigError, errorMessage } from "./errors";
 import { validateCommand } from "./commands/validate";
 import { runCommand, writeOrchestratorStartupFailure, type OrchestratorRunOptions } from "./commands/run";
 import { SecretMasker } from "./logging/mask";
 import { runAllCommand } from "./commands/runAll";
 import { unlockCommand } from "./commands/unlock";
 import { initLogAppCommand, checkLogAppCommand } from "./commands/initLogapp";
+import { capabilitiesCommand } from "./commands/capabilities";
+import { describeProfileCommand } from "./commands/describeProfile";
+import { inspectJobCommand } from "./commands/inspectJob";
 
 export interface ParsedArgs {
   command: string;
@@ -53,6 +56,9 @@ const COMMAND_FLAGS: Record<string, ReadonlySet<string>> = {
   ]),
   unlock: new Set(COMMON_FLAGS),
   "init-logapp": new Set([...COMMON_FLAGS, "--name"]),
+  capabilities: new Set(["--json", "--help", "-h"]),
+  "describe-profile": new Set([...COMMON_FLAGS, "--json"]),
+  "inspect-job": new Set([...COMMON_FLAGS, "-f", "--file", "--json"]),
 };
 
 const POSITIONAL_COUNTS: Record<string, number> = {
@@ -62,7 +68,11 @@ const POSITIONAL_COUNTS: Record<string, number> = {
   "run-all": 1,
   unlock: 0,
   "init-logapp": 0,
+  capabilities: 0,
+  "describe-profile": 0,
+  "inspect-job": 0,
 };
+const MACHINE_JSON_COMMANDS = new Set(["capabilities", "describe-profile", "inspect-job"]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const [command, ...rest] = argv;
@@ -119,7 +129,11 @@ export function validateArgs(args: ParsedArgs): void {
   rejectConflict(args, ["-f", "--file"]);
   rejectConflict(args, ["--resume", "--resume-batch", "--from", "--only"]);
   rejectConflict(args, ["--stop-on-error", "--continue-on-error"]);
-  if ((args.flags.has("--json") || args.flags.has("--sample")) && !args.flags.has("--dry-run")) {
+  if (
+    (args.command === "run" || args.command === "run-all") &&
+    (args.flags.has("--json") || args.flags.has("--sample")) &&
+    !args.flags.has("--dry-run")
+  ) {
     throw new Error("--json / --sample は --dry-run との併用時のみ指定できます");
   }
   validateOrchestratorArgs(args);
@@ -195,6 +209,9 @@ const USAGE = `kSQL Flow — kintone バッチランナー (MIT, as-is)
                 [--max-api-calls N] [--lock local-only] [--force-unlock]
   ksql-flow unlock [--profile p]  # 同一 profile の全 RUNNING を一覧表示後に解除
   ksql-flow init-logapp [--profile p] [--name アプリ名]
+  ksql-flow capabilities --json
+  ksql-flow describe-profile --profile <p> --config <path> --json
+  ksql-flow inspect-job -f <file.sql> --profile <p> --config <path> --json
 
 共通フラグ:
   --profile <name>   使用するプロファイル（省略時は defaultProfile）
@@ -241,12 +258,29 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   if (COMMAND_FLAGS[args.command] !== undefined && (boolFlag(args, "--help") || boolFlag(args, "-h"))) {
-    console.log(USAGE);
+    if (MACHINE_JSON_COMMANDS.has(args.command)) console.error(USAGE);
+    else console.log(USAGE);
     return EXIT.OK;
   }
 
   try {
     switch (args.command) {
+      case "capabilities": {
+        requireJsonFlag(args);
+        return capabilitiesCommand();
+      }
+      case "describe-profile": {
+        requireJsonFlag(args);
+        requireExplicitProfileAndConfig(args);
+        return describeProfileCommand(loadProfile(args));
+      }
+      case "inspect-job": {
+        requireJsonFlag(args);
+        requireExplicitProfileAndConfig(args);
+        const file = stringFlag(args, "-f") ?? stringFlag(args, "--file");
+        if (!file) throw new ConfigError("inspect-job には -f <file.sql> が必要です");
+        return await inspectJobCommand(loadProfile(args), file);
+      }
       case "validate": {
         const profile = loadProfile(args);
         if (boolFlag(args, "--check-logapp")) {
@@ -330,6 +364,16 @@ export async function main(argv: string[]): Promise<number> {
     }
     console.error(`エラー: ${errorMessage(error)}`);
     return typeof exitCode === "number" ? (exitCode as number) : EXIT.RUNTIME;
+  }
+}
+
+function requireJsonFlag(args: ParsedArgs): void {
+  if (!boolFlag(args, "--json")) throw new ConfigError(`${args.command} には --json が必要です`);
+}
+
+function requireExplicitProfileAndConfig(args: ParsedArgs): void {
+  if (stringFlag(args, "--profile") === undefined || stringFlag(args, "--config") === undefined) {
+    throw new ConfigError(`${args.command} には --profile <p> と --config <path> が必要です`);
   }
 }
 
