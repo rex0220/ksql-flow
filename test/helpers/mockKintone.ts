@@ -42,6 +42,7 @@ interface FailureRule {
 export interface RequestLogEntry {
   method: string;
   path: string;
+  query?: string;
   appId?: number;
   token?: string;
   body?: unknown;
@@ -103,7 +104,7 @@ export class MockKintone {
     const search = parsed.searchParams;
     const appIdRaw = (body as { app?: unknown })?.app ?? search.get("app") ?? undefined;
     const appId = appIdRaw !== undefined && appIdRaw !== null ? Number(appIdRaw) : undefined;
-    this.requests.push({ method, path, appId, token, body });
+    this.requests.push({ method, path, query: parsed.search, appId, token, body });
 
     for (const [index, rule] of this.failures.entries()) {
       if (rule.times > 0 && (rule.match === undefined || rule.match(method, path, appId))) {
@@ -245,6 +246,7 @@ export class MockKintone {
       upsert?: boolean;
       records: Array<{
         id?: number;
+        revision?: number;
         updateKey?: { field: string; value: unknown };
         record: Record<string, { value: unknown }>;
       }>;
@@ -315,6 +317,9 @@ export class MockKintone {
     for (const update of body.records) {
       const stored = entry.records.find((row) => row.id === Number(update.id));
       if (!stored) throw new MockApiError(404, "GAIA_RE01", `record ${update.id} not found in app ${body.app}`);
+      if (update.revision !== undefined && update.revision !== stored.revision) {
+        throw new MockApiError(409, "GAIA_CO02", `revision conflict for record ${update.id}`);
+      }
       this.validateRecordFields(body.app, update.record);
       const next: Record<string, string> = { ...stored.values };
       for (const [code, item] of Object.entries(update.record)) {
@@ -324,7 +329,12 @@ export class MockKintone {
       stored.values = next;
       stored.revision += 1;
     }
-    return jsonResponse(200, { records: body.records.map((row) => ({ id: String(row.id), revision: "2" })) });
+    return jsonResponse(200, {
+      records: body.records.map((row) => {
+        const stored = entry.records.find((item) => item.id === Number(row.id));
+        return { id: String(row.id), revision: String(stored?.revision ?? "") };
+      }),
+    });
   }
 
   private deleteRecords(body: { app: number; ids: number[] }, token: string | undefined): Response {

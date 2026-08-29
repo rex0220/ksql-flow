@@ -51,6 +51,37 @@ function readResult(file: string): ExecutionResult {
   return result;
 }
 
+function isExecutionStartedPut(input: string | URL | Request, init?: RequestInit): boolean {
+  const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
+  if ((init?.method ?? "GET").toUpperCase() !== "PUT" || !url.pathname.endsWith("/records.json")) return false;
+  if (typeof init?.body !== "string") return false;
+  const body = JSON.parse(init.body) as {
+    app?: number;
+    records?: Array<{ record?: Record<string, unknown> }>;
+  };
+  return body.app === 999 && body.records?.some((record) => "runner_execution_started_at" in (record.record ?? {})) === true;
+}
+
+function loseDurablePutResponse(options: { loseConfirmationGets?: boolean } = {}): typeof fetch {
+  let durablePutPersisted = false;
+  return async (input, init) => {
+    const response = await world!.mock.fetch(input, init);
+    if (isExecutionStartedPut(input, init) && !durablePutPersisted) {
+      durablePutPersisted = true;
+      throw new TypeError("durable PUT response lost");
+    }
+    if (durablePutPersisted && options.loseConfirmationGets === true) {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
+      const isConfirmationGet =
+        (init?.method ?? "GET").toUpperCase() === "GET" &&
+        url.pathname.endsWith("/records.json") &&
+        url.searchParams.getAll("fields[]").includes("runner_execution_started_at");
+      if (isConfirmationGet) throw new TypeError("confirmation GET response lost");
+    }
+    return response;
+  };
+}
+
 test("--result-json - は stdout に JSON object 1 個 + LF だけを書き、ID と as-of を echo する", async () => {
   world = buildWorld({ orders: [] });
   const file = writeJob(world, "01_monthly.sql", SAMPLE_JOB);
@@ -115,6 +146,116 @@ test("orchestrator JOB と JSONL 全イベントへ相関値を記録し、書�
     (request) => request.appId === 999 && request.method === "GET" && request.path.endsWith("/app/form/fields.json")
   );
   expect(fieldGets).toHaveLength(1);
+});
+
+test("耐久 EXECUTION_STARTED を SQL より先に記録し、JOB 値・結果 startedAt・JSONL 順序を一致させる", async () => {
+  world = buildWorld({ orders: [] });
+  const file = writeJob(world, "01_monthly.sql", SAMPLE_JOB);
+  const target = path.join(world.dir, "durable-start.json");
+
+  expect(await runCommand(world.profile, file, options(target))).toBe(EXIT.OK);
+  const result = readResult(target);
+  const job = logRecords(world).find((record) => record.record_type === "JOB");
+  expect(job?.runner_execution_started_at).toBe(toKintoneDateTime(new Date(result.startedAt!)));
+  expect(new Date(job!.runner_execution_started_at).getTime()).toBe(new Date(result.startedAt!).getTime());
+
+  const markerPutIndex = world.mock.requests.findIndex((request) => {
+    if (request.method !== "PUT" || request.appId !== 999) return false;
+    const body = request.body as { records?: Array<{ revision?: number; record?: Record<string, unknown> }> };
+    return body.records?.some((record) => "runner_execution_started_at" in (record.record ?? {})) === true;
+  });
+  const firstDataReadIndex = world.mock.requests.findIndex(
+    (request) => request.method === "GET" && request.appId === 100 && request.path.endsWith("/records.json")
+  );
+  expect(markerPutIndex).toBeGreaterThan(-1);
+  expect(firstDataReadIndex).toBeGreaterThan(markerPutIndex);
+  const markerBody = world.mock.requests[markerPutIndex].body as {
+    records: Array<{ revision?: number; record: { runner_execution_started_at: { value: string } } }>;
+  };
+  expect(markerBody.records[0].revision).toBe(1);
+  expect(markerBody.records[0].record.runner_execution_started_at.value)
+    .toBe(toKintoneDateTime(new Date(result.startedAt!)));
+
+  const events = fs.readFileSync(
+    path.join(world.profile.logging.localDir, `${result.executionId}.jsonl`),
+    "utf8"
+  ).trim().split("\n").map((line) => JSON.parse(line) as { event: string; startedAt?: string });
+  const startIndex = events.findIndex((event) => event.event === "execution_started");
+  const statementIndex = events.findIndex((event) => event.event === "statement");
+  expect(startIndex).toBeGreaterThan(events.findIndex((event) => event.event === "job_start"));
+  expect(statementIndex).toBeGreaterThan(startIndex);
+  expect(events[startIndex].startedAt).toBe(result.startedAt);
+});
+
+test("EXECUTION_STARTED UPDATE 失敗はデータ API を呼ばず LOCK_UNAVAILABLE で fail-closed", async () => {
+  world = buildWorld({ orders: [] });
+  world.mock.failNext({
+    times: 2,
+    status: 500,
+    match: (method, requestPath, appId) =>
+      method === "PUT" && requestPath.endsWith("/records.json") && appId === 999,
+  });
+  const file = writeJob(world, "01_monthly.sql", SAMPLE_JOB);
+  const target = path.join(world.dir, "durable-update-failed.json");
+
+  expect(await runCommand(world.profile, file, options(target))).toBe(EXIT.RUNTIME);
+  expect(readResult(target)).toMatchObject({
+    resultCode: "LOCK_UNAVAILABLE",
+    executionStarted: false,
+    startedAt: null,
+    exitCode: EXIT.RUNTIME,
+  });
+  expect(world.mock.requests.filter((request) => request.appId === 100 || request.appId === 200)).toEqual([]);
+});
+
+test("EXECUTION_STARTED UPDATE の応答消失後、同一レコード GET で値を確認できれば続行する", async () => {
+  world = buildWorld({ orders: [] });
+  const file = writeJob(world, "01_monthly.sql", SAMPLE_JOB);
+  const target = path.join(world.dir, "durable-confirmed.json");
+
+  expect(await runCommand(world.profile, file, options(target, { baseFetch: loseDurablePutResponse() }))).toBe(EXIT.OK);
+  const result = readResult(target);
+  expect(result).toMatchObject({ resultCode: "NO_DATA", executionStarted: true, exitCode: EXIT.OK });
+  expect(logRecords(world).find((record) => record.record_type === "JOB")?.runner_execution_started_at)
+    .toBe(toKintoneDateTime(new Date(result.startedAt!)));
+  expect(world.mock.requests.some((request) =>
+    request.method === "GET" &&
+    request.appId === 999 &&
+    request.path.endsWith("/records.json") &&
+    new URLSearchParams(request.query).getAll("fields[]").includes("runner_execution_started_at")
+  )).toBe(true);
+});
+
+test("EXECUTION_STARTED UPDATE 応答消失後の再 GET も確認不能なら SQL 未実行で fail-closed", async () => {
+  world = buildWorld({ orders: [] });
+  const file = writeJob(world, "01_monthly.sql", SAMPLE_JOB);
+  const target = path.join(world.dir, "durable-unconfirmed.json");
+
+  expect(await runCommand(world.profile, file, options(target, {
+    baseFetch: loseDurablePutResponse({ loseConfirmationGets: true }),
+  }))).toBe(EXIT.RUNTIME);
+  expect(readResult(target)).toMatchObject({
+    resultCode: "LOCK_UNAVAILABLE",
+    executionStarted: false,
+    startedAt: null,
+    exitCode: EXIT.RUNTIME,
+  });
+  expect(world.mock.requests.filter((request) => request.appId === 100 || request.appId === 200)).toEqual([]);
+});
+
+test("standalone run は runner_execution_started_at UPDATE を発行しない", async () => {
+  world = buildWorld({ orders: [] });
+  const file = writeJob(world, "01_monthly.sql", SAMPLE_JOB);
+  expect(await runCommand(world.profile, file, {
+    asOf: AS_OF,
+    baseFetch: world.mock.fetch,
+    out: world.out,
+  })).toBe(EXIT.OK);
+  expect(world.mock.requests.some((request) => {
+    if (request.method !== "PUT" || request.appId !== 999) return false;
+    const body = request.body as { records?: Array<{ record?: Record<string, unknown> }> };
+    return body.records?.some((record) => "runner_execution_started_at" in (record.record ?? {})) === true;
+  })).toBe(false);
 });
 
 test("旧ログアプリは standalone で従来どおり動作し、orchestrator は SQL 開始前に fail-closed", async () => {

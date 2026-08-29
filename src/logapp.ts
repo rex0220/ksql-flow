@@ -116,7 +116,9 @@ export class LogAppClient {
           return { codes };
         })
         .catch((error) => {
-          this.out(`  情報: ログアプリのフィールド判定に失敗したため deleted_count は送信しません (${errorMessage(error)})`);
+          this.out(
+            `  情報: ログアプリのフィールド判定に失敗したため任意フィールド（deleted_count・相関フィールド）は送信しません (${errorMessage(error)})`
+          );
           // standalone は従来フィールドで書込を続行する。orchestrator は error を見て fail-closed にする。
           const legacyCodes = new Set(LOG_FIELD_CODES.filter(
             (code) => !OPTIONAL_LOG_APP_FIELD_CODES.has(code) && !ORCHESTRATOR_LOG_APP_FIELD_CODES.includes(code)
@@ -287,6 +289,46 @@ export class LogAppClient {
       await this.update(recordId, fields);
     } catch (error) {
       this.jsonl.append("checkpoint_write_failed", { recordId, error: errorMessage(error) });
+    }
+  }
+
+  /**
+   * orchestrator の SQL 開始証跡を耐久化する。
+   *
+   * acquireLock の INSERT 直後にだけ呼ぶため expected revision は 1。公式 Flow API が
+   * revision を kintone PUT へ透過するので、別更新が先行した場合は楽観ロックで拒否する。
+   * PUT 応答を確認できない場合だけ同一 record ID を GET し、自分の値が残っていれば成功とみなす。
+   * checkpoint と異なり、確認不能を握りつぶしたり再送キューへ積んだりしない。
+   */
+  async markExecutionStarted(recordId: string, startedAt: Date): Promise<void> {
+    const value = toKintoneDateTime(startedAt);
+    try {
+      const compatible = await this.writableFields({ runner_execution_started_at: value });
+      await this.client.putRecords({
+        app: this.appId,
+        records: [{
+          id: Number(recordId),
+          revision: 1,
+          record: toKintoneRecord(compatible),
+        }],
+      });
+      return;
+    } catch (updateError) {
+      try {
+        const result = await this.client.getRecords({
+          app: this.appId,
+          query: `$id = ${Number(recordId)} limit 1`,
+          fields: ["$id", "runner_execution_started_at"],
+        });
+        const persisted = result.records[0]?.["runner_execution_started_at"]?.value;
+        if (String(persisted ?? "") === value) return;
+        throw new Error("runner_execution_started_at が書込値と一致しません");
+      } catch (confirmError) {
+        throw new LockUnavailableError(
+          `EXECUTION_STARTED をログアプリで確認できないため SQL を開始しません (fail-closed): ${errorMessage(confirmError)}`,
+          updateError
+        );
+      }
     }
   }
 

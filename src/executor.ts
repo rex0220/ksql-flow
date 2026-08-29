@@ -50,6 +50,8 @@ export interface RunJobParams {
   jobKey: string;
   /** 最初の executeStatement の直前。M1-d の耐久 EXECUTION_STARTED もこの挿入点を使う。 */
   onExecutionStart?: (startedAt: Date) => void | Promise<void>;
+  /** orchestrator のみ。最初の SQL 文より先にログアプリへ EXECUTION_STARTED を耐久化する。 */
+  durableExecutionStarted?: boolean;
   /** Execution Result 境界へ分類材料を渡す観測フック。既存の結果・ログには影響させない。 */
   onExecutionError?: (cause: unknown, code?: string) => void;
   /** orchestrator 実行の JOB レコードにだけ保存する相関値。 */
@@ -246,8 +248,23 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
     for (const [index, statement] of job.parsed.statements.entries()) {
       if (!executionStartNotified) {
         executionStartNotified = true;
+        // kintone DATETIME はミリ秒を保持しない。結果 JSON と耐久値を同一時点にするため、
+        // フックへ渡す Date 自体を kintone の保存精度へ正規化する。
+        const executionStartedAt = new Date(toKintoneDateTime(new Date()));
+        if (params.durableExecutionStarted === true) {
+          if (env.logApp === null || recordId === null) {
+            throw new LockUnavailableError(
+              "EXECUTION_STARTED を耐久化する JOB レコードがないため SQL を開始しません (fail-closed)"
+            );
+          }
+          await env.logApp.markExecutionStarted(recordId, executionStartedAt);
+          env.jsonl.append("execution_started", {
+            job: job.name,
+            recordId,
+            startedAt: executionStartedAt.toISOString(),
+          });
+        }
         if (params.onExecutionStart !== undefined) {
-          const executionStartedAt = new Date();
           await params.onExecutionStart(executionStartedAt);
         }
       }

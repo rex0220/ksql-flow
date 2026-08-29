@@ -168,8 +168,8 @@ JOB レコードへ runner_execution_started_at（+相関 ID）を UPDATE し、
 | M1-a | KF-01: 型・schema・変換表（裁定 Q13 反映済み・着手可） | fixture（sql-error.json 含む）+ 自作正常/失敗結果が schema 検証を通る |
 | M1-b | KF-02: CLI 4 フラグ・stdout 規律・atomic 書込・controlled failure | stdout/path 両方で結果取得、全失敗経路で JSON と Exit が一致 |
 | M1-c | 相関 ID ログ伝播 + template v0.4 + 旧 schema 互換 | JOB ログ/JSONL から attempt を追跡できる・旧アプリで退行なし |
-| M1-d | KF-03: capabilities / describe-profile / inspect-job | 3 コマンドの JSON が仕様どおり・秘密ゼロ・canonical 規則固定 |
-| M1-e | KF-04: 耐久 EXECUTION_STARTED | 確認不能時に SQL 未開始で fail-closed（障害注入で実証） |
+| M1-d | KF-04: 耐久 EXECUTION_STARTED（実施順を KF-03 と入替え — M1-b/M1-c の run 経路変更に密結合のため先行） | 確認不能時に SQL 未開始で fail-closed（障害注入で実証） |
+| M1-e | KF-03: capabilities / describe-profile / inspect-job | 3 コマンドの JSON が仕様どおり・秘密ゼロ・canonical 規則固定 |
 | M1-f | KF-05: signal / cancel（両 OS） | 境界ごとの cancel テスト + Windows/Unix 実測記録 |
 | M1-g | KF-06: inspect-lock / force-unlock-job | 停止確認なし拒否・応答消失 fail-closed・結果照合テスト |
 | M1-h | 契約試験一式 + 回帰（run-all/dry-run/unlock）+ 返信文書材料 | 受入基準の kSQL-Flow 担当分が全て緑・実測記録あり |

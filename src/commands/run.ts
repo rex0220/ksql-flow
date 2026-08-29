@@ -323,6 +323,7 @@ async function runOrchestratedCommand(
       timeoutMs: effectiveTimeoutMs(job.timeoutSec, batchDeadline),
       jobKey,
       correlation: { correlationId: options.correlationId, attemptId: options.attemptId },
+      durableExecutionStarted: true,
       onExecutionStart: (startedAt) => {
         executionStarted = true;
         executionStartedAt = startedAt;
