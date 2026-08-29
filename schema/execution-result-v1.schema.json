@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rex0220/ksql-flow/blob/main/schema/execution-result-v1.schema.json",
+  "title": "kSQL Flow Execution Result v1",
+  "$comment": "Canonical schema distributed by kSQL Flow. resultCode and error.category remain open strings for additive v1 compatibility.",
+  "x-contract": "ksql-flow.execution/v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "formatVersion",
+    "kind",
+    "contract",
+    "correlationId",
+    "attemptId",
+    "executionId",
+    "jobId",
+    "profile",
+    "status",
+    "resultCode",
+    "executionStarted",
+    "exitCode",
+    "asOf",
+    "startedAt",
+    "finishedAt",
+    "durationMs",
+    "readCount",
+    "writtenCount",
+    "deletedCount",
+    "apiCalls",
+    "lastSuccessfulChunkNo",
+    "lastWrittenKey",
+    "ksqlFlowVersion",
+    "engineVersion",
+    "error"
+  ],
+  "properties": {
+    "formatVersion": { "type": "number", "const": 1 },
+    "kind": { "type": "string", "const": "EXECUTION_RESULT" },
+    "contract": { "type": "string", "const": "ksql-flow.execution/v1" },
+    "correlationId": { "type": "string", "minLength": 1 },
+    "attemptId": { "type": "string", "minLength": 1 },
+    "executionId": { "type": "string", "minLength": 1 },
+    "jobId": { "type": "string", "minLength": 1 },
+    "profile": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["SUCCESS", "FAILED", "CANCELLED"] },
+    "resultCode": { "type": "string", "minLength": 1 },
+    "executionStarted": { "type": "boolean" },
+    "exitCode": { "type": "number", "enum": [0, 1, 2, 3, 5] },
+    "asOf": { "type": ["string", "null"] },
+    "startedAt": {
+      "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "Z$" }]
+    },
+    "finishedAt": { "type": "string", "pattern": "Z$" },
+    "durationMs": { "type": "number", "minimum": 0 },
+    "readCount": { "$ref": "#/$defs/nonNegativeInteger" },
+    "writtenCount": { "$ref": "#/$defs/nonNegativeInteger" },
+    "deletedCount": { "$ref": "#/$defs/nonNegativeInteger" },
+    "apiCalls": { "$ref": "#/$defs/nonNegativeInteger" },
+    "lastSuccessfulChunkNo": { "type": ["integer", "null"], "minimum": 0 },
+    "lastWrittenKey": { "type": ["string", "null"] },
+    "ksqlFlowVersion": { "type": "string", "minLength": 1 },
+    "engineVersion": { "type": "string", "minLength": 1 },
+    "error": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/error" }]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "SUCCESS" } }, "required": ["status"] },
+      "then": { "properties": { "exitCode": { "const": 0 }, "executionStarted": { "const": true }, "error": { "type": "null" } } },
+      "else": {
+        "if": { "properties": { "status": { "const": "CANCELLED" } }, "required": ["status"] },
+        "then": { "properties": { "exitCode": { "const": 3 }, "error": { "$ref": "#/$defs/error" } } },
+        "else": { "properties": { "exitCode": { "enum": [1, 2, 3, 5] }, "error": { "$ref": "#/$defs/error" } } }
+      }
+    },
+    {
+      "if": { "properties": { "executionStarted": { "const": false } }, "required": ["executionStarted"] },
+      "then": {
+        "properties": {
+          "startedAt": { "type": "null" },
+          "durationMs": { "const": 0 },
+          "readCount": { "const": 0 },
+          "writtenCount": { "const": 0 },
+          "deletedCount": { "const": 0 },
+          "apiCalls": { "const": 0 },
+          "lastSuccessfulChunkNo": { "type": "null" },
+          "lastWrittenKey": { "type": "null" }
+        }
+      },
+      "else": { "properties": { "startedAt": { "type": "string" } } }
+    },
+    {
+      "if": { "properties": { "resultCode": { "enum": ["OK", "NO_DATA"] } }, "required": ["resultCode"] },
+      "then": {
+        "properties": {
+          "status": { "const": "SUCCESS" },
+          "exitCode": { "const": 0 },
+          "executionStarted": { "const": true },
+          "error": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "resultCode": { "const": "VALIDATION_ERROR" } }, "required": ["resultCode"] },
+      "then": { "$ref": "#/$defs/validationFailure" }
+    },
+    {
+      "if": { "properties": { "resultCode": { "const": "SQL_ERROR" } }, "required": ["resultCode"] },
+      "then": { "$ref": "#/$defs/sqlFailure" }
+    },
+    {
+      "if": { "properties": { "resultCode": { "const": "ASSERT_FAILED" } }, "required": ["resultCode"] },
+      "then": { "$ref": "#/$defs/assertFailure" }
+    },
+    {
+      "if": { "properties": { "resultCode": { "const": "EXECUTION_TIMEOUT" } }, "required": ["resultCode"] },
+      "then": { "$ref": "#/$defs/timeoutFailure" }
+    },
+    {
+      "if": { "properties": { "resultCode": { "const": "AUTH_ERROR" } }, "required": ["resultCode"] },
+      "then": { "$ref": "#/$defs/authFailure" }
+    },
+    {
+      "if": { "properties": { "resultCode": { "const": "API_ERROR" } }, "required": ["resultCode"] },
+      "then": { "$ref": "#/$defs/apiFailure" }
+    },
+    {
+      "if": { "properties": { "resultCode": { "enum": ["LOCK_UNAVAILABLE", "LOCK_CONFLICT"] } }, "required": ["resultCode"] },
+      "then": { "$ref": "#/$defs/lockFailure" }
+    },
+    {
+      "if": { "properties": { "resultCode": { "const": "INTERNAL_ERROR" } }, "required": ["resultCode"] },
+      "then": { "$ref": "#/$defs/internalFailure" }
+    },
+    {
+      "if": { "properties": { "resultCode": { "const": "CANCELLED" } }, "required": ["resultCode"] },
+      "then": { "$ref": "#/$defs/cancelledFailure" }
+    }
+  ],
+  "$defs": {
+    "nonNegativeInteger": { "type": "integer", "minimum": 0 },
+    "error": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["category", "code", "message", "retryable", "detailsTruncated"],
+      "properties": {
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "$comment": "Initial producer values: CONFIG, SQL, ASSERT, API, AUTH, TIMEOUT, LOCK, INTERNAL, CANCELLED. New values are additive in v1."
+        },
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "maxLength": 2000 },
+        "retryable": { "type": "boolean" },
+        "detailsTruncated": { "type": "boolean" }
+      }
+    },
+    "failedWithError": {
+      "properties": { "status": { "const": "FAILED" }, "error": { "$ref": "#/$defs/error" } }
+    },
+    "validationFailure": {
+      "allOf": [
+        { "$ref": "#/$defs/failedWithError" },
+        { "properties": { "exitCode": { "const": 1 }, "executionStarted": { "const": false }, "error": { "properties": { "category": { "const": "CONFIG" } } } } }
+      ]
+    },
+    "sqlFailure": {
+      "allOf": [
+        { "$ref": "#/$defs/failedWithError" },
+        { "properties": { "exitCode": { "const": 1 }, "executionStarted": { "const": true }, "error": { "properties": { "category": { "const": "SQL" } } } } }
+      ]
+    },
+    "assertFailure": {
+      "allOf": [
+        { "$ref": "#/$defs/failedWithError" },
+        { "properties": { "exitCode": { "const": 2 }, "executionStarted": { "const": true }, "error": { "properties": { "category": { "const": "ASSERT" } } } } }
+      ]
+    },
+    "timeoutFailure": {
+      "allOf": [
+        { "$ref": "#/$defs/failedWithError" },
+        { "properties": { "exitCode": { "const": 3 }, "executionStarted": { "const": true }, "error": { "properties": { "category": { "const": "TIMEOUT" } } } } }
+      ]
+    },
+    "authFailure": {
+      "allOf": [
+        { "$ref": "#/$defs/failedWithError" },
+        { "properties": { "exitCode": { "const": 3 }, "error": { "properties": { "category": { "const": "AUTH" } } } } }
+      ]
+    },
+    "apiFailure": {
+      "allOf": [
+        { "$ref": "#/$defs/failedWithError" },
+        { "properties": { "exitCode": { "const": 3 }, "error": { "properties": { "category": { "const": "API" } } } } }
+      ]
+    },
+    "lockFailure": {
+      "allOf": [
+        { "$ref": "#/$defs/failedWithError" },
+        {
+          "properties": {
+            "status": { "const": "FAILED" },
+            "executionStarted": { "const": false },
+            "error": { "properties": { "category": { "const": "LOCK" } } }
+          }
+        },
+        {
+          "if": { "properties": { "resultCode": { "const": "LOCK_CONFLICT" } } },
+          "then": { "properties": { "exitCode": { "const": 5 } } },
+          "else": { "properties": { "exitCode": { "const": 3 } } }
+        }
+      ]
+    },
+    "internalFailure": {
+      "allOf": [
+        { "$ref": "#/$defs/failedWithError" },
+        { "properties": { "exitCode": { "const": 3 }, "error": { "properties": { "category": { "const": "INTERNAL" } } } } }
+      ]
+    },
+    "cancelledFailure": {
+      "properties": {
+        "status": { "const": "CANCELLED" },
+        "exitCode": { "const": 3 },
+        "error": { "allOf": [{ "$ref": "#/$defs/error" }, { "properties": { "category": { "const": "CANCELLED" } } }] }
+      }
+    }
+  }
+}

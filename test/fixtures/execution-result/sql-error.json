@@ -1,0 +1,33 @@
+{
+  "formatVersion": 1,
+  "kind": "EXECUTION_RESULT",
+  "contract": "ksql-flow.execution/v1",
+  "correlationId": "netrun_20260830_001",
+  "attemptId": "attempt_20260830_001_A_001",
+  "executionId": "ksqlrun_20260830_001",
+  "jobId": "aggregate_customer",
+  "profile": "prod",
+  "status": "FAILED",
+  "resultCode": "SQL_ERROR",
+  "executionStarted": true,
+  "exitCode": 1,
+  "asOf": "2026-08-01T00:00:00+09:00",
+  "startedAt": "2026-08-30T08:00:00.000Z",
+  "finishedAt": "2026-08-30T08:00:01.000Z",
+  "durationMs": 1000,
+  "readCount": 0,
+  "writtenCount": 0,
+  "deletedCount": 0,
+  "apiCalls": 1,
+  "lastSuccessfulChunkNo": null,
+  "lastWrittenKey": null,
+  "ksqlFlowVersion": "0.x.y",
+  "engineVersion": "3.x.y",
+  "error": {
+    "category": "SQL",
+    "code": "FIELD_NOT_FOUND",
+    "message": "field does not exist",
+    "retryable": false,
+    "detailsTruncated": false
+  }
+}
