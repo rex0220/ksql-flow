@@ -20,3 +20,7 @@
 ## 総合判定
 
 **M1-h 机上パート通過**。残タスクは実機検証のみ: (2) check-logapp、(3) 128 文字 ID、(4) orchestrator E2E（EXECUTION_STARTED・結果 path・lock 回復）、(5) Windows 実コンソール signal、(6) Unix signal。完了後に本報告を確定版へ更新し、オーナー承認を経て FlowNet へ送付する。
+
+## 追記（2026-08-30・互換性修正の再レビュー）
+
+オーナー質問「単独利用では追加項目の有無は無影響か」の精査で、`--check-logapp` が旧 v0.3 アプリに対し相関 5 フィールド欠落と `CANCELLED` 不足を NG（Exit 1）にする偽陽性を検出（ランナー本体は無影響 — M1-c 試験済み）。Codex 修正をレビュー: 相関 5 フィールドと status の `CANCELLED` のみ情報行へ（誘導メッセージ付き）、その他の不足・過剰・unique 検査は従来どおり NG。実行時 `requireFields`（orchestrator の fail-closed）は不変更。v0.3 相当/v0.4/job_key 欠落/その他 status 不備の 4 方向テストを確認、287/287 green・typecheck 成功。**通過**。

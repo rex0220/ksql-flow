@@ -1,6 +1,11 @@
 import { ResolvedProfile } from "../config";
 import { ConfigError, errorMessage } from "../errors";
-import { expectedLogFieldCodes, LOG_APP_FIELDS, OPTIONAL_LOG_APP_FIELD_CODES } from "../logapp";
+import {
+  expectedLogFieldCodes,
+  LOG_APP_FIELDS,
+  OPTIONAL_LOG_APP_FIELD_CODES,
+  ORCHESTRATOR_LOG_APP_FIELD_CODES,
+} from "../logapp";
 import { createRunnerEnv } from "../runner";
 import { EXIT, ExitCode } from "../types";
 
@@ -92,6 +97,13 @@ export async function checkLogAppCommand(
         out(`  情報: 任意フィールド ${code} が未追加です`);
         continue;
       }
+      if (ORCHESTRATOR_LOG_APP_FIELD_CODES.includes(code)) {
+        out(
+          `  情報: 任意フィールド ${code} が未追加です` +
+          "（orchestrator/kSQL-FlowNet 実行時のみ必須。scripts/logapp_v04_upgrade.console.js で追加できます）"
+        );
+        continue;
+      }
       out(`  NG: フィールド "${code}" (${def.label}) がありません (期待タイプ: ${def.type})`);
       problems += 1;
       continue;
@@ -107,9 +119,16 @@ export async function checkLogAppCommand(
     if (def.options !== undefined) {
       const expectedOptions = [...def.options].sort();
       const actualOptions = Object.keys(actual.optionOrder ?? {}).sort();
-      if (JSON.stringify(actualOptions) !== JSON.stringify(expectedOptions)) {
-        const missing = expectedOptions.filter((option) => !actualOptions.includes(option));
-        const extra = actualOptions.filter((option) => !expectedOptions.includes(option));
+      let missing = expectedOptions.filter((option) => !actualOptions.includes(option));
+      const extra = actualOptions.filter((option) => !expectedOptions.includes(option));
+      if (code === "status" && missing.includes("CANCELLED")) {
+        out(
+          "  情報: status の任意選択肢 CANCELLED が未追加です" +
+          "（graceful cancel の記録に必要。旧アプリでは cancel 時に pending 退避して継続します）"
+        );
+        missing = missing.filter((option) => option !== "CANCELLED");
+      }
+      if (missing.length > 0 || extra.length > 0) {
         out(
           `  NG: フィールド "${code}" の選択肢集合が不一致です` +
           `${missing.length > 0 ? ` (不足: ${missing.join(", ")})` : ""}` +

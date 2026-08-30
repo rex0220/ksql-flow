@@ -262,7 +262,7 @@ describe("init-logapp / --check-logapp（設計書 付録 B）", () => {
     expect(world.output.join("\n")).toContain("password");
   });
 
-  test("--check-logapp: deleted_count があれば型を検査して OK", async () => {
+  test("--check-logapp: v0.4 の全フィールドと CANCELLED があれば従来どおり OK", async () => {
     world = buildWorld({ withDeletedCount: true });
     const code = await checkLogAppCommand(world.profile, {
       baseFetch: world.mock.fetch,
@@ -284,17 +284,20 @@ describe("init-logapp / --check-logapp（設計書 付録 B）", () => {
     expect(world.output.join("\n")).toContain("任意フィールド deleted_count が未追加");
   });
 
-  test("--check-logapp: orchestrator 相関フィールドがない旧アプリは NG", async () => {
-    world = buildWorld({ withOrchestratorFields: false });
+  test("--check-logapp: v0.3 相当アプリは相関フィールドと CANCELLED がなくても案内付きで OK", async () => {
+    world = buildWorld({ withOrchestratorFields: false, withCancelledStatus: false });
     const code = await checkLogAppCommand(world.profile, {
       baseFetch: world.mock.fetch,
       out: world.out,
     });
-    expect(code).toBe(EXIT.VALIDATION);
+    expect(code).toBe(EXIT.OK);
     const text = world.output.join("\n");
     for (const field of ["correlation_id", "attempt_id", "execution_id", "job_id", "runner_execution_started_at"]) {
-      expect(text).toContain(`フィールド "${field}"`);
+      expect(text).toContain(`任意フィールド ${field} が未追加です`);
     }
+    expect(text).toContain("orchestrator/kSQL-FlowNet 実行時のみ必須");
+    expect(text).toContain("status の任意選択肢 CANCELLED が未追加です");
+    expect(text).toContain("旧アプリでは cancel 時に pending 退避して継続");
   });
 
   test("--check-logapp: deleted_count が NUMBER 以外なら NG", async () => {
@@ -322,11 +325,22 @@ describe("init-logapp / --check-logapp（設計書 付録 B）", () => {
     expect(text).toContain("last_written_key");
   });
 
+  test("--check-logapp: 必須フィールド job_key の欠落は引き続き NG (Exit 1)", async () => {
+    world = buildWorld({});
+    delete (world.mock.app(LOG_APP).def.fields as Record<string, unknown>)["job_key"];
+    const code = await checkLogAppCommand(world.profile, {
+      baseFetch: world.mock.fetch,
+      out: world.out,
+    });
+    expect(code).toBe(EXIT.VALIDATION);
+    expect(world.output.join("\n")).toContain('フィールド "job_key"');
+  });
+
   test("--check-logapp: record_type / status の不足・過剰選択肢を NG 表示する", async () => {
     world = buildWorld({});
     world.mock.app(LOG_APP).def.fields.record_type.options = ["BATCH"];
     world.mock.app(LOG_APP).def.fields.status.options = [
-      "SUCCESS", "NO_DATA", "FAILED", "ABORTED", "SKIPPED", "RUNNING", "TIMEOUT", "UNKNOWN",
+      "SUCCESS", "NO_DATA", "FAILED", "ABORTED", "SKIPPED", "RUNNING", "UNKNOWN",
     ];
     const code = await checkLogAppCommand(world.profile, {
       baseFetch: world.mock.fetch,
@@ -334,7 +348,9 @@ describe("init-logapp / --check-logapp（設計書 付録 B）", () => {
     });
     expect(code).toBe(EXIT.VALIDATION);
     expect(world.output.join("\n")).toContain("不足: JOB");
+    expect(world.output.join("\n")).toContain("不足: TIMEOUT");
     expect(world.output.join("\n")).toContain("過剰: UNKNOWN");
+    expect(world.output.join("\n")).toContain("status の任意選択肢 CANCELLED が未追加です");
   });
 });
 

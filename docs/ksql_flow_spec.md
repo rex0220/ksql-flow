@@ -889,4 +889,4 @@ CMD ["ksql-flow", "run-all", "./jobs/", "--profile", "prod"]
 
 * **推奨: 同梱アプリテンプレート**（`template/ksql-flow-log-template1.zip`）から作成する。kintone のアプリ作成画面で「テンプレートファイルを読み込む」を選び zip を直接指定すればよく、システム管理への登録は不要。8.2 の全フィールド（`job_key` の重複禁止設定含む）に加え、レイアウト・一覧も設定済み。認証情報の受け渡しが不要で最も簡単。
 * 代替: `ksql init-logapp --profile prod` で、8.2 のフィールド定義を持つログアプリを自動作成（kintone アプリ作成 API 使用のため **password 認証プロファイルが必要**）。`job_key` の重複禁止設定まで行う。
-* いずれの場合も、作成後に `ksql validate --check-logapp` でフィールド定義の過不足（`job_key` の重複禁止、`record_type` の BATCH/JOB、`status` の 7 値の選択肢集合を含む）を検査できる。既存アプリを流用する場合も同様。
+* いずれの場合も、作成後に `ksql validate --check-logapp` でフィールド定義の過不足（`job_key` の重複禁止、`record_type` の BATCH/JOB、`status` の選択肢集合を含む）を検査できる。既存アプリを流用する場合も同様。standalone 互換のため、orchestrator/kSQL-FlowNet 用の相関 5 フィールドと `status` の `CANCELLED` は未追加でも情報表示に留め、それ以外の不足・過剰は不備とする。
