@@ -2,14 +2,16 @@
 
 このプロジェクトの主な変更を記録します。
 
-## [Unreleased] - v0.7.0 予定
+## [0.7.0] - 2026-08-30
 
 - FlowNet 等の orchestrator から単一 `run` を安全に呼び出す 4 フラグ（`--result-json` / `--correlation-id` / `--attempt-id` / `--expected-job-id`）を追加。Execution Result v1 の正本 JSON Schema を同梱し、stdout 純 JSON、path の atomic 書込・既存ファイル上書き拒否、ID 照合、controlled failure の機械可読結果を契約化しました。
 - 互換性・設定・ジョブを通信なしで検査する `capabilities --json` / `describe-profile --json` / `inspect-job --json` を追加。orchestrator 実行では最初の SQL 文直前にログアプリへ耐久 `EXECUTION_STARTED` を revision 付きで記録し、確認不能時は SQL 未開始で fail-closed します。
 - 単一 `run` の graceful cancel を追加。1 回目の SIGINT / SIGTERM / SIGBREAK は進行中 request と確定済み chunk を待って `CANCELLED`（Exit 3）を返し、2 回目は即時終了します。signal と真のエラーが同時発生した場合も結果は `CANCELLED` を優先し、元エラーはローカル JSONL に残します。
 - 対象限定のロック診断・回復コマンド `inspect-lock --json` / `force-unlock-job --json` を追加。停止確認者・理由・証拠 URI を必須とし、revision 固定の単一 UPDATE と再照会で解除結果を機械可読に返します。既存の人間向け `unlock` / `--force-unlock` は変更しません。
-- 同梱ログアプリテンプレートを v0.4 に更新。任意の相関フィールド 5 個と `CANCELLED` 選択肢を追加しました。旧ログアプリは standalone 実行で引き続き利用でき、orchestrator 実行だけは必要フィールド欠落時に SQL 未開始で拒否します。
-- 既存の `run` / `run-all` / dry-run / resume / Exit Code は後方互換です。新しい orchestrator 4 フラグは全て未指定なら従来動作、いずれかを指定した場合だけ 4 つ全てを要求します。package version は本節追加時点では変更していません。
+- 同梱ログアプリテンプレートを v0.4 に更新。任意の相関フィールド 5 個と `CANCELLED` 選択肢に加え、orchestrator 実行の確認用一覧「FlowNet相関確認」とレイアウト（相関フィールドを `バッチ実行ID` 直後に配置）を収録しました。旧ログアプリは standalone 実行で引き続き利用でき、orchestrator 実行だけは必要フィールド欠落時に SQL 未開始で拒否します。
+- 既存アプリを v0.4 相当へ更新するブラウザ Console スクリプト 2 本を同梱しました（`scripts/logapp_v04_upgrade.console.js` = フィールド・選択肢・レイアウト・一覧の追加、`scripts/logapp_v04_field_acl.console.js` = 相関 5 フィールドの Everyone=閲覧のみ ACL。kintone テンプレートはフィールドアクセス権を持ち出せないため、ACL はテンプレート経路でもこのスクリプトで設定します）。
+- `validate --check-logapp` は相関 5 フィールドと status の `CANCELLED` を任意扱いにしました。旧 v0.3 アプリでも NG にならず、情報行で追加手段を案内します（orchestrator 実行時のみ実行時検査で必須）。
+- 既存の `run` / `run-all` / dry-run / resume / Exit Code は後方互換です。新しい orchestrator 4 フラグは全て未指定なら従来動作、いずれかを指定した場合だけ 4 つ全てを要求します。Execution Contract v1 は kSQL-FlowNet 側で ACCEPTED（2026-08-30）。
 
 ## [0.6.0] - 2026-08-28
 

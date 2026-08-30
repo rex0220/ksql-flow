@@ -1,6 +1,6 @@
 {
   "name": "@rex0220/ksql-flow",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "kSQL Flow — batch runner CLI for kintone-sql-tools Flow dialect 1 (orchestration, locking, rerun, log app, retry, notification)",
   "license": "MIT",
   "author": "rex0220",
@@ -35,6 +35,8 @@
     "dist",
     "schema",
     "template",
+    "scripts/logapp_v04_upgrade.console.js",
+    "scripts/logapp_v04_field_acl.console.js",
     "README.md",
     "LICENSE"
   ],
