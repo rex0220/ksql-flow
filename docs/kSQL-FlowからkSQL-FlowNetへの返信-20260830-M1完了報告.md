@@ -1,11 +1,11 @@
 # kSQL-Flow から kSQL-FlowNet への返信: M1 完了報告
 
-**状態: 実機検証完了・オーナー承認待ち（承認をもって確定版とし FlowNet へ送付）**  
+**状態: 確定版（実機検証完了・オーナー承認 2026-08-30）**  
 作成日: 2026-08-30 / 対象: Execution Contract v1 Phase 0（KF-01〜KF-06、M1-a〜M1-h + 追補）
 
 ## 1. 実装内容とコミット範囲
 
-M1-a〜M1-g は実装・Claude Code レビュー通過・コミット済みである。コミット範囲は `6780fd9^..29fac48`（実装コミットは `6780fd9`〜`29fac48` の 7 件）。M1-h は本書作成時点で机上パートを実装・試験済みだが、未コミットである。
+M1-a〜M1-h（追補含む）はすべて実装・Claude Code レビュー通過・コミット済みである。実装コミットは `6780fd9`（M1-a）〜 `29fac48`（M1-g）、`46c3c84`（M1-h 机上）、`d869ded`（分精度追補）、`3f6dbd4`（--check-logapp 互換修正）。付随して template v0.4 更新（`64f9137`）と Console スクリプト 2 本（`04eb725` 系 / `76ef792`）を同梱した。
 
 | マイルストーン | KF / 内容 | コミット・状態 |
 | --- | --- | --- |
@@ -16,7 +16,7 @@ M1-a〜M1-g は実装・Claude Code レビュー通過・コミット済みで�
 | M1-e | KF-03 `capabilities` / `describe-profile` / `inspect-job` | `f58846a` |
 | M1-f | KF-05 graceful cancel、境界停止、forced termination | `1a3ef63` |
 | M1-g | KF-06 `inspect-lock` / `force-unlock-job` | `29fac48` |
-| M1-h | レビュー指摘 3 件、EPIPE/additive field/回帰試験、README/CHANGELOG/本報告 | 未コミット（机上完了） |
+| M1-h | レビュー指摘 3 件、EPIPE/additive field/回帰試験、README/CHANGELOG/本報告 | `46c3c84` + 追補 `d869ded` / `3f6dbd4` |
 
 M1-h では次を追加確定した。
 
@@ -120,4 +120,4 @@ FlowNet 側には、job ID / describe-profile 照合、`KSQL1306` 例外承認�
 
 任意の残項目（Ctrl+Break 実コンソール・rollback 実削除・ロック競合の実機再現 = FlowNet D-11 実測と単体試験で担保済み）は Phase 0 受入に影響しない。
 
-本書はオーナー承認をもって確定版とする。承認後、FlowNet 側で Contract v1 の ACCEPTED 昇格と FDR D-22/D-23/D-26 のクローズ審議をお願いしたい。
+本書はオーナー承認済みの確定版である（2026-08-30）。FlowNet 側で Contract v1 の ACCEPTED 昇格と FDR D-22/D-23/D-26 のクローズ審議をお願いしたい。
