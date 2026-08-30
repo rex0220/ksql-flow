@@ -49,10 +49,17 @@
 - 実ログアプリ追認（Claude Code・実 GET）: `status=CANCELLED`（v0.4 追加選択肢が本番で機能）・`job_key=""` クリア + `job_key_done=prod:intake_count` 退避（ロック解放）・error_message 記録 — 「結果とログ確定 → ロック解放」の実機動作を確認
 - Ctrl+Break（SIGBREAK）の実コンソール操作は任意の残項目（`process.emit` による捕捉試験は M1-f で完了済み）
 
-## 未実施（残項目）
+## 項目 6: Unix signal 実測 — **合格（2026-08-30）**
 
-| # | 項目 | 実施方法（予定） |
-| --- | --- | --- |
-| 6 | Unix signal 実測 | WSL distro なし・Docker daemon 停止のため環境準備待ち（`linux_docker_verification_plan.md` の枠組み） |
-| - | Ctrl+Break 実コンソール（任意）・rollback 実削除（任意）・ロック競合実機再現（任意 — FlowNet D-11 実測と単体試験で担保済み） | 必要なら追加実施 |
+- 環境: VPS vm-69245b5e-30（Linux 6.8.0-138-generic / Node v22.23.2）。新ビルドを npm pack → `/tmp/m1-signal` の隔離ディレクトリへ install（本番 `/opt/ksql/my-ksql-jobs` の node_modules は不変更）。config/.env は運用中のものを使用、ジョブは読取のみの `intake_count`。試験後に一時ファイルは全削除
+- 結果:
+  - **SIGINT**（実行中 kill）: `CANCELLED (exit 3)`・エラー内容に SIGINT 明記
+  - **SIGTERM**（実行中 kill）: `CANCELLED (exit 3)`・SIGTERM 明記
+  - **2 回目 signal**（INT×2）: 即時終了 exit 3、結果・終了メッセージ未出力（forced termination 契約どおり）
+  - **orchestrator + SIGTERM**: 結果 JSON `status=CANCELLED / resultCode=CANCELLED / exitCode=3`（プロセス Exit と一致）・`executionStarted=false / startedAt=null / count 0`（**SQL 開始前 cancel** の契約ケース）・error.category/code=CANCELLED
+- 限定: 実 OS signal で観測した cancel は SQL 開始前フェーズ（ジョブが約 1.5 秒で完走するため）。文間・write chunk 間の境界停止は M1-f の signal 模擬試験で担保済み
+
+## 未実施（任意のみ）
+
+Ctrl+Break 実コンソール・rollback 実削除・ロック競合実機再現（FlowNet D-11 実測と単体試験で担保済み）。**必須の実機検証はすべて完了**。
 | - | rollback 実削除の試行（任意）・ロック競合の実機再現（FlowNet D-11 実測と単体試験で担保済みのため任意） | 必要なら追加実施 |

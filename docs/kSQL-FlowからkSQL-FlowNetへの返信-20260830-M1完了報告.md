@@ -1,7 +1,7 @@
 # kSQL-Flow から kSQL-FlowNet への返信: M1 完了報告
 
-**状態: ドラフト（実機検証未了・オーナー承認待ち）**  
-作成日: 2026-08-30 / 対象: Execution Contract v1 Phase 0（KF-01〜KF-06、M1-a〜M1-h）
+**状態: 実機検証完了・オーナー承認待ち（承認をもって確定版とし FlowNet へ送付）**  
+作成日: 2026-08-30 / 対象: Execution Contract v1 Phase 0（KF-01〜KF-06、M1-a〜M1-h + 追補）
 
 ## 1. 実装内容とコミット範囲
 
@@ -69,7 +69,7 @@ M1-h では次を追加確定した。
 - kintone DATETIME は分精度のため、JOB 値は分精度、Execution Result `startedAt` と JSONL 時刻は秒精度を維持し、三者は分単位で一致する。実機検証で確認済み（`docs/internal/m1_verification_record_20260830.md` 項目 4）。
 - UPDATE 失敗時はデータ API 0 件、`LOCK_UNAVAILABLE` / Exit 3 / `executionStarted=false`、ロック解放を試験済み。
 - PUT 応答消失後の再 GET 一致なら続行、不一致・照会不能なら SQL 未実行で fail-closed の両分岐を試験済み。
-- 実 kintone E2E は実施済み（`docs/internal/m1_verification_record_20260830.md` 項目 4）。プロセス実 signal/kill は未実施のため、本ドラフトだけで D-22 を最終クローズしない。
+- 実 kintone E2E 実施済み（検証記録 項目 4）。プロセス実 signal も Windows 実コンソール（項目 5）と Unix VPS（項目 6: SIGINT/SIGTERM/2 回目 signal/orchestrator 結果 JSON）で実施済み。kSQL-Flow 側の D-22 材料は揃った — クローズ判断は FlowNet の審議に委ねる。
 
 ### D-23: inspect-job と静的検出限界
 
@@ -84,7 +84,7 @@ FlowNet 側には、job ID / describe-profile 照合、`KSQL1306` 例外承認�
 
 ### D-26: force-unlock 所有境界
 
-対象限定の 2 コマンド、停止確認必須入力、revision 固定単一 UPDATE、監査、安定 outcome/Exit、応答消失後の再照会、409 後の他者解放 `NOT_RUNNING` 分類まで机上試験済み。FlowNet は lock レコードを直接変更せず、この結果を Network 監査へ関連付ける。実 kintone E2E は未実施のため、本ドラフトだけで最終クローズしない。
+対象限定の 2 コマンド、停止確認必須入力、revision 固定単一 UPDATE、監査、安定 outcome/Exit、応答消失後の再照会、409 後の他者解放 `NOT_RUNNING` 分類まで机上試験済み。実 kintone でも NOT_FOUND・必須入力の API 前拒否・`inspect-lock` を E2E 確認した（検証記録 項目 4）。FlowNet は lock レコードを直接変更せず、この結果を Network 監査へ関連付ける。RUNNING 実レコードに対する RELEASED/CONFLICT の実機再現は障害注入を要するため単体試験で担保（任意の追加実施は可能）。
 
 ## 5. Phase 0 受入基準の充足状況
 
@@ -95,25 +95,29 @@ FlowNet 側には、job ID / describe-profile 照合、`KSQL1306` 例外承認�
 | 1 | result stdout に JSON 以外を混入しない | kSQL-Flow | 机上完了。1 object + LF、BOM/ANSI/人間向け出力なしを試験 |
 | 2 | path で途中 JSON を完成結果として観測しない | kSQL-Flow | 机上完了。same-dir temp、fsync、atomic rename、既存拒否、EPIPE 非干渉を試験 |
 | 3 | JSON Exit とプロセス Exit の一致 | kSQL-Flow | 机上完了。controlled failure と出力失敗時の本来 Exit 維持を試験 |
-| 4 | correlationId / attemptId が入力と一致 | kSQL-Flow | 机上完了。128 文字値の実ログアプリ受理は実機待ち |
-| 5 | JOB / JSONL から Node Attempt を追跡可能 | kSQL-Flow | 机上完了。template v0.4 の実ログアプリ適用は完了（`docs/internal/m1_verification_record_20260830.md` 項目 1）。実 kintone での相関記録 E2E は実機待ち |
+| 4 | correlationId / attemptId が入力と一致 | kSQL-Flow | **完了**。128 文字値の echo と実ログアプリでの保存・再 GET を実機確認（検証記録 項目 3） |
+| 5 | JOB / JSONL から Node Attempt を追跡可能 | kSQL-Flow | **完了**。template v0.4 の実ログアプリ適用（項目 1）と、実 kintone での相関 5 フィールド記録・`job_key_done` 退避を E2E 確認（項目 4）。相関フィールドは Everyone=閲覧のみの ACL を適用済み（ランナー書込は不変を追認） |
 | 6 | SUCCESS / NO_DATA / ASSERT / timeout / API / lock を安定分類 | kSQL-Flow | 机上完了。controlled failure 全経路と schema 整合を試験 |
 | 7 | JSON なし・破損・ID/Exit 不一致を UNKNOWN | FlowNet | FlowNet 責務。kSQL-Flow は不正結果を生成しない schema 試験済み |
 | 8 | capability 不一致で SQL 未実行 | FlowNet | FlowNet 責務。kSQL-Flow は capabilities の正直な値を机上確認済み |
 | 9 | profile/job ID/非決定要素の事前照合 | 分担 | expected-job-id 拒否は kSQL-Flow 机上完了。describe-profile 照合と例外承認は FlowNet 責務 |
 | 10 | node_id と job_id が異なっても同じ Job lock | 分担 | kSQL-Flow は照合済み論理 job ID から既存 `{profile}:{job_id}` を生成。FlowNet の node/job 分離結合は FlowNet 責務 |
-| 11 | `EXECUTION_STARTED` 未確認なら SQL 未開始 | kSQL-Flow | 机上完了。失敗・応答消失分岐を試験。実 kintone E2E 待ち |
+| 11 | `EXECUTION_STARTED` 未確認なら SQL 未開始 | kSQL-Flow | **完了**。失敗・応答消失分岐を試験し、実 kintone で `runner_execution_started_at` の耐久記録を E2E 確認（検証記録 項目 4。kintone DATETIME 分精度の実機事実を照合へ反映済み） |
 | 12 | executionStarted/resultCode 矛盾を拒否 | FlowNet | FlowNet の不正結果受入責務。kSQL-Flow 正本 schema は矛盾を拒否済み |
 | 13 | 既存 run-all Exit / resume 非退行 | kSQL-Flow | 机上完了。Exit 0〜5、優先順位、resume の既存試験を維持 |
-| 14 | Windows / Unix signal・forced kill | kSQL-Flow | **実機待ち**。process.emit による全境界試験のみ完了 |
-| 15 | 相関フィールドが旧 schema/record と共存・rollback可能 | kSQL-Flow | 旧 schema standalone と orchestrator fail-closed は机上完了。**実ログアプリへの v0.4 適用・既存レコード共存は実機確認済み（2026-08-30、検証記録 項目 1）**。128 文字 ID と rollback 実削除は実機待ち |
-| 16 | force-unlock が停止確認なし拒否・結果照合可能 | 分担 | kSQL-Flow 机上完了。FlowNet 監査関連付けと実 kintone E2E は未了 |
+| 14 | Windows / Unix signal・forced kill | kSQL-Flow | **完了**。Windows 実コンソール Ctrl+C（SIGINT→CANCELLED/Exit 3・実ログアプリの status=CANCELLED とロック解放を追認、項目 5）。Unix（VPS 実機）: SIGINT / SIGTERM →CANCELLED/Exit 3・2 回目 signal の即時終了・orchestrator+SIGTERM の結果 JSON（CANCELLED/executionStarted=false）を確認（項目 6）。文間・chunk 間境界は signal 模擬試験で担保 |
+| 15 | 相関フィールドが旧 schema/record と共存・rollback可能 | kSQL-Flow | **完了**。実ログアプリへの v0.4 適用・既存レコード共存（項目 1）・128 文字 ID（項目 3）を実機確認。rollback は追加フィールド・選択肢・一覧の削除で可能（実削除試行のみ任意） |
+| 16 | force-unlock が停止確認なし拒否・結果照合可能 | 分担 | kSQL-Flow 完了。実 kintone で NOT_FOUND・必須入力の API 前拒否・inspect-lock を E2E 確認（項目 4）。FlowNet 監査関連付けは FlowNet 責務 |
 
-## 6. 未了の実機検証（TBD）
+## 6. 実機検証の結果
 
-1. ~~template v0.4 の実ログアプリ適用~~ — **完了（2026-08-30）**。`scripts/logapp_v04_upgrade.console.js` により相関 5 フィールド・`CANCELLED` 選択肢・レイアウト・確認用一覧を適用し、本番フォーム検証まで合格（`docs/internal/m1_verification_record_20260830.md` 項目 1）。rollback の実削除試行のみ任意の残項目。
-2. 相関 ID 5 フィールドで 128 文字 ID が保存・再 GET できることの確認（認証値は記録しない）。
-3. Windows 実 console の Ctrl+C / Ctrl+Break と forced termination、Unix の SIGINT / SIGTERM と 2 回目 signal を実プロセスで確認。
-4. 実 kintone で orchestrator 単一 run、耐久 `EXECUTION_STARTED`、応答消失相当、結果 path、`inspect-lock` / `force-unlock-job` の E2E を確認。
+必須の実機検証はすべて完了した（2026-08-30、devenxyfi.cybozu.com / 実行ログ app 4249 / Windows 実コンソール / Linux VPS。詳細: `docs/internal/m1_verification_record_20260830.md`）。
 
-以上の実機記録とオーナー承認を得るまで、本書と Execution Contract v1 の状態はドラフトのままとする。
+1. template v0.4 の実ログアプリ適用（相関 5 フィールド・CANCELLED 選択肢・レイアウト・確認用一覧「FlowNet相関確認」）— 合格。相関 5 フィールドへ Everyone=閲覧のみ の ACL を適用し、ランナー（API トークン）書込が妨げられないことを追認
+2. `validate --check-logapp` の新フィールド認識・128 文字相関 ID の保存・再 GET — 合格
+3. 実 kintone orchestrator E2E（SUCCESS/NO_DATA・耐久 `EXECUTION_STARTED`・結果 path・expected-job-id 不一致・既存 path 拒否・`inspect-lock` / `force-unlock-job`・stdout 純度）— 合格。**kintone DATETIME が分精度である実機事実を検出し、応答消失時の再 GET 照合を分精度へ修正済み**（§2 の確定事項へ反映）
+4. signal 実機: Windows 実コンソール Ctrl+C、Unix（Linux 6.8 / Node 22）SIGINT・SIGTERM・2 回目 signal・orchestrator+SIGTERM の結果 JSON — 合格
+
+任意の残項目（Ctrl+Break 実コンソール・rollback 実削除・ロック競合の実機再現 = FlowNet D-11 実測と単体試験で担保済み）は Phase 0 受入に影響しない。
+
+本書はオーナー承認をもって確定版とする。承認後、FlowNet 側で Contract v1 の ACCEPTED 昇格と FDR D-22/D-23/D-26 のクローズ審議をお願いしたい。
