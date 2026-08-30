@@ -42,10 +42,17 @@
 - 適用後に Claude Code が orchestrator run を再実行し、**API トークン経由の書込が妨げられない**こと（correlation_id / runner_execution_started_at / status の記録、Exit 0）を実 GET で追認
 - 根拠: 監査・耐久証跡の人為改変防止（Q12 と同方式。API トークンは Administrator 相当でフィールドアクセス権の対象外）
 
+## 項目 5: Windows 実コンソール signal — **合格（2026-08-30）**
+
+- 実施: オーナーが PowerShell 実コンソールから standalone `run` を起動し、実行中に **Ctrl+C**
+- CLI 出力: `=> CANCELLED (exit 3) 読取 0 件 / 書込 0 件 / API 3 回`・`エラー内容: SIGINT を受信したため実行をキャンセルしました` — graceful cancel が実 OS の signal 配送で機能
+- 実ログアプリ追認（Claude Code・実 GET）: `status=CANCELLED`（v0.4 追加選択肢が本番で機能）・`job_key=""` クリア + `job_key_done=prod:intake_count` 退避（ロック解放）・error_message 記録 — 「結果とログ確定 → ロック解放」の実機動作を確認
+- Ctrl+Break（SIGBREAK）の実コンソール操作は任意の残項目（`process.emit` による捕捉試験は M1-f で完了済み）
+
 ## 未実施（残項目）
 
 | # | 項目 | 実施方法（予定） |
 | --- | --- | --- |
-| 5 | Windows 実コンソールの Ctrl+C / CTRL_BREAK | オーナー操作（手順は別途提示） |
 | 6 | Unix signal 実測 | WSL distro なし・Docker daemon 停止のため環境準備待ち（`linux_docker_verification_plan.md` の枠組み） |
+| - | Ctrl+Break 実コンソール（任意）・rollback 実削除（任意）・ロック競合実機再現（任意 — FlowNet D-11 実測と単体試験で担保済み） | 必要なら追加実施 |
 | - | rollback 実削除の試行（任意）・ロック競合の実機再現（FlowNet D-11 実測と単体試験で担保済みのため任意） | 必要なら追加実施 |
