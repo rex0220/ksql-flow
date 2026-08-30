@@ -8,6 +8,8 @@
  *   - status ドロップダウンへ選択肢 CANCELLED を追加（既存選択肢・既定値は変更しない）
  *   - フォームレイアウト: 追加 5 フィールドを batch_id の行の直後へ 2 行で配置
  *     （1 行目: 相関ID / 試行ID / 実行ID、2 行目: 論理ジョブ名 / SQL実行開始日時）
+ *   - 一覧「FlowNet相関確認」を追加（相関ID が入ったレコードだけを新しい順に表示。
+ *     orchestrator 経由の実行が相関フィールドへ記録できているかの確認用）
  *
  * 使い方:
  *   1. kintone にアプリ管理権限のあるアカウントでログインする
@@ -20,8 +22,8 @@
  *   - 既存フィールドの定義（status の既存選択肢・既定値を含む）とレコードは変更しない
  *   - デプロイ前に confirm で止まる。キャンセルすれば preview に残るだけなので、
  *     kintone の画面から「アプリの設定を反映する」または「変更を中止」で処理できる
- *   - rollback: 追加した 5 フィールドと CANCELLED 選択肢をフォーム設定から削除して
- *     反映すれば v0.3 相当へ戻る（既存レコードの値は失われる点のみ注意）
+ *   - rollback: 追加した 5 フィールド・CANCELLED 選択肢・一覧「FlowNet相関確認」を
+ *     アプリ設定から削除して反映すれば v0.3 相当へ戻る（既存レコードの値は失われる点のみ注意）
  *
  * 定義の正: ksql-flow src/logapp.ts LOG_APP_FIELDS（template v0.4）
  */
@@ -90,6 +92,28 @@
   ];
   const FIELD_WIDTH = "193"; // 既存 1 行テキスト系と揃える標準幅
 
+  // 確認用一覧: 相関 ID が記録されたレコード（= orchestrator 経由の実行）だけを新しい順に表示
+  const VIEW_NAME = "FlowNet相関確認";
+  const VIEW = {
+    type: "LIST",
+    name: VIEW_NAME,
+    fields: [
+      "record_type",
+      "status",
+      "script_name",
+      "job_id",
+      "correlation_id",
+      "attempt_id",
+      "execution_id",
+      "runner_execution_started_at",
+      "started_at",
+      "finished_at",
+      "batch_id",
+    ],
+    filterCond: 'correlation_id != ""',
+    sort: "started_at desc",
+  };
+
   // ---- API ヘルパ ------------------------------------------------------
   // 素の fetch は POST で CSRF トークン切れ (CB_CS01) になるため、
   // kintone ページで使える kintone.api()（要求トークンを自動付与）で呼ぶ。
@@ -146,11 +170,6 @@
       };
     }
 
-    if (Object.keys(toAdd).length === 0 && statusUpdate === null) {
-      console.log("%c変更すべき点はありません（v0.4 適用済み）。", "color:green;font-weight:bold");
-      return;
-    }
-
     if (Object.keys(toAdd).length) {
       console.log("追加するフィールド:");
       console.table(
@@ -159,12 +178,23 @@
     }
     if (statusUpdate) console.log(`status へ選択肢 ${STATUS_NEW_OPTION} を追加します（既存選択肢・既定値は不変）`);
 
+    // 一覧「FlowNet相関確認」の追加要否（PUT は全一覧の置換のため、既存一覧を丸ごと引き継ぐ）
+    const viewsCurrent = await api("/preview/app/views", "GET", { app: appId });
+    const viewExists = Object.prototype.hasOwnProperty.call(viewsCurrent.views, VIEW_NAME);
+    if (viewExists) console.log(`一覧「${VIEW_NAME}」は既に存在（スキップ）`);
+
+    if (Object.keys(toAdd).length === 0 && statusUpdate === null && viewExists) {
+      console.log("%c変更すべき点はありません（v0.4 適用済み）。", "color:green;font-weight:bold");
+      return;
+    }
+
     if (
       !confirm(
         `実行ログアプリ (${appId}) へ v0.4 更新を適用してデプロイします。\n` +
           `- フィールド追加: ${Object.keys(toAdd).length} 個\n` +
           `- status への ${STATUS_NEW_OPTION} 追加: ${statusUpdate ? "あり" : "なし"}\n` +
-          `- レイアウト: batch_id 行の直後へ配置\nよろしいですか？`
+          `- レイアウト: batch_id 行の直後へ配置\n` +
+          `- 一覧「${VIEW_NAME}」の追加: ${viewExists ? "なし（既存）" : "あり"}\nよろしいですか？`
       )
     ) {
       console.log("中止しました（preview にも書いていません）。");
@@ -224,7 +254,22 @@
       );
     }
 
-    // 5. デプロイ
+    // 5. 一覧「FlowNet相関確認」を追加（既存一覧はそのまま引き継ぎ、末尾の表示順で追加）
+    if (!viewExists) {
+      const nextViewIndex = String(
+        Object.values(viewsCurrent.views).reduce((max, v) => Math.max(max, Number(v.index)), -1) + 1
+      );
+      await api("/preview/app/views", "PUT", {
+        app: appId,
+        views: {
+          ...viewsCurrent.views,
+          [VIEW_NAME]: { ...VIEW, index: nextViewIndex },
+        },
+      });
+      console.log(`一覧「${VIEW_NAME}」を追加しました（相関ID あり・新しい順）`);
+    }
+
+    // 6. デプロイ
     await api("/preview/app/deploy", "POST", { apps: [{ app: appId }] });
     console.log("デプロイを要求しました。反映を待ちます…");
     for (let i = 0; i < 60; i++) {
@@ -236,7 +281,7 @@
       if (s === "FAIL" || s === "CANCEL") throw new Error(`デプロイが ${s} で終了しました`);
     }
 
-    // 6. 本番フォームで検証
+    // 7. 本番フォームで検証
     const live = await api("/app/form/fields", "GET", { app: appId });
     console.log("%c検証結果:", "font-weight:bold");
     let ng = 0;
@@ -263,6 +308,14 @@
       console.error(`  NG status に ${STATUS_NEW_OPTION} がありません`);
       ng += 1;
     }
+    const liveViews = await api("/app/views", "GET", { app: appId });
+    const liveView = liveViews.views?.[VIEW_NAME];
+    if (liveView && VIEW.fields.every((code) => liveView.fields.includes(code))) {
+      console.log(`  OK 一覧「${VIEW_NAME}」あり（${liveView.fields.length} 列）`);
+    } else {
+      console.error(`  NG 一覧「${VIEW_NAME}」が${liveView ? "列不足です" : "ありません"}`);
+      ng += 1;
+    }
     console.log(
       ng === 0 ? "%c完了: v0.4 更新はすべて正常です。" : `%c${ng} 件に問題があります。`,
       ng === 0 ? "color:green;font-weight:bold" : "color:red;font-weight:bold"
@@ -272,7 +325,7 @@
         "確認（任意・kintone の画面から）: " +
           "①フォームで相関 5 フィールドが batch_id の直後に並んでいること " +
           "②`ksql-flow validate --check-logapp` が新フィールドを認識すること " +
-          "③orchestrator 経由の実行で correlation_id 等が記録されること"
+          `③orchestrator 経由の実行後、一覧「${VIEW_NAME}」に相関ID 付きレコードが表示されること`
       );
     }
   } catch (e) {
