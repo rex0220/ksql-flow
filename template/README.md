@@ -36,6 +36,7 @@ ksql-flow validate --check-logapp --profile <profile>
   1. 失敗の条件通知（2 条件レシピ — 本 README 下部・連載 #4）
   2. **ハング検知のリマインダー通知**（`ステータス` = RUNNING・`更新日時` の 2 時間後 — **仕様 §5.5 の必須監視構成**。TIMEOUT への更新は次回実行の回収時点なので、これが無いとハングを検知できません）
   3. ポーラー導入時のみ: フィールドのアクセス権（`rerun_request` は依頼者グループのみ編集可・他の全フィールドは Everyone 閲覧のみ）とリラン滞留リマインダー（`更新日時` + 1 時間・`rerun_request` に REQUEST を含む かつ `rerun_state` 未選択）
+  4. **orchestrator（kSQL-FlowNet）導入時のみ**: 確認用一覧「FlowNet相関確認」と相関 5 フィールドの Everyone=閲覧のみ ACL。既存アプリへは同梱スクリプト（`scripts/logapp_v04_upgrade.console.js` → `scripts/logapp_v04_field_acl.console.js`）で適用する。FlowNet を新規導入する場合のログアプリは、**FlowNet 側配布のテンプレート（ログアプリ同梱・一覧/ACL 設定済み）を使う想定**のため、本テンプレートには収録しない（オーナー裁定 2026-08-30 — standalone 製品に orchestrator 固有設定を持ち込まない境界）
 
 ## 代替手段
 

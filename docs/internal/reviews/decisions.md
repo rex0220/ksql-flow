@@ -178,3 +178,9 @@
 - **裁定（オーナー承認済み）**: kSQL-Flow 側提案どおり**契約側を修正**。`SQL_ERROR` = FAILED/**Exit 1**（`executionStarted` は到達状況どおり）、`VALIDATION_ERROR` = SQL 開始前限定（`executionStarted = false` 必須）。Exit 1 は resultCode + `executionStarted` で判別する。実行時 SQL エラーの Exit 3 再分類案は互換性条件（Exit Code 維持）に抵触するため不採用。
 - **反映**: ksql-flownet main `c95cbc4`（契約 §4.2/§12・変更点一覧 §3・draft schema・fixture `sql-error.json`）。本リポジトリは `docs/internal/flow_m1_execution_contract_task.md` §3 の変換表と `schema/execution-result-v1.schema.json`（実装時）へ反映する。裁定文書: `docs/kSQL-FlowNetからの返信-20260830-M1疑義裁定.md`。
 - 付随合意: orchestrator モード 4 オプションの全か無か規則・§13 予告 11 項目に異議なし。補足 3 点（result-json 一意パスは FlowNet 責務 / schema 正本は kSQL-Flow 同梱版で `$id`+contract version を含め capabilities から参照可能に / 既存 `job_key` 系の制約は変えない）。
+
+## Q14. FlowNet 固有のログアプリ設定（確認用一覧・相関フィールド ACL）の配布境界（2026-08-30 裁定）
+
+- **裁定**: ksql-flow 同梱の `template/ksql-flow-log-template1.zip` には v0.4 の相関フィールド・CANCELLED 選択肢までを収録し、**一覧「FlowNet相関確認」と相関 5 フィールドの Everyone=閲覧のみ ACL は収録しない**。これらは orchestrator（kSQL-FlowNet）導入時のみ意味を持つ設定であり、(a) 既存アプリへは同梱 Console スクリプト 2 本で適用、(b) **FlowNet 新規導入時のログアプリは FlowNet 側配布テンプレート（ログアプリ同梱・一覧/ACL 設定済み）で作成する**役割分担とする。
+- 理由: kintone テンプレートは新規アプリ作成専用で既存アプリへ適用できない（スクリプト経路はどのみち必須）。standalone 製品のテンプレートに orchestrator 固有の運用設定を持ち込まない境界が明確になる。FlowNet 側テンプレートの元は、検証アプリ（v0.4 + 一覧 + ACL 適用済み）のエクスポートを使用できる。
+- 反映: `template/README.md`「テンプレートに含まれない設定」4 項、完了報告 §2 JOB 相関移行行。FlowNet へは完了報告でログアプリ同梱テンプレートの整備を提案。
