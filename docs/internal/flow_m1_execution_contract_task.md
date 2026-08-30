@@ -125,8 +125,8 @@ JOB レコードへ runner_execution_started_at（+相関 ID）を UPDATE し、
   ↓ 確認 NG → SQL を開始せず fail-closed（結果 JSON: LOCK_UNAVAILABLE / executionStarted=false）
 ```
 
-* **応答消失時の照会手順（§13 決定・提案）**: UPDATE の応答を確認できない場合、同レコードを再 GET（リトライ規則は既存 HTTP 層に従う）し、`runner_execution_started_at` が自分の値で設定済みなら「永続化成功」として SQL を開始してよい。再 GET でも確認できなければ fail-closed。revision は kintone の楽観ロック（PUT の revision 指定）が engine `/flow` API 経由で使えるか確認し、使えなければ「自 batch_id のレコードへの再 GET 照合」で代替（エンジンへの機能依頼が必要なら文書起票し、返信文書に記録）
-* `startedAt`（結果 JSON）はこの UPDATE 時刻と同一時点を使う
+* **応答消失時の照会手順（§13 決定・提案）**: UPDATE の応答を確認できない場合、同レコードを再 GET（リトライ規則は既存 HTTP 層に従う）し、送信値と `runner_execution_started_at` を双方とも分単位へ正規化して一致した場合は「永続化成功」として SQL を開始してよい。対象レコードの同フィールドは当該ランナーだけが書くため、分精度一致で永続化確認として十分である。再 GET でも確認できなければ fail-closed。revision は kintone の楽観ロック（PUT の revision 指定）が engine `/flow` API 経由で使えるか確認し、使えなければ「自 batch_id のレコードへの再 GET 照合」で代替（エンジンへの機能依頼が必要なら文書起票し、返信文書に記録）。kintone DATETIME が分精度であることと本照合は実機検証済み（`m1_verification_record_20260830.md` 項目 4）
+* `startedAt`（結果 JSON）はこの UPDATE の送信時刻を秒精度で維持する。JOB の `runner_execution_started_at` は kintone DATETIME の分精度で保存され、両者は分単位で一致する
 * standalone（orchestrator フラグなし）の `run` は本シーケンスを行わない（従来どおり。余計な API 消費と旧 schema 非互換を避ける）
 
 ## 8. KF-05: signal / graceful cancel

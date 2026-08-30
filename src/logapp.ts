@@ -451,8 +451,12 @@ export class LogAppClient {
           query: `$id = ${Number(recordId)} limit 1`,
           fields: ["$id", "runner_execution_started_at"],
         });
-        const persisted = result.records[0]?.["runner_execution_started_at"]?.value;
-        if (String(persisted ?? "") === value) return;
+        const persisted = String(result.records[0]?.["runner_execution_started_at"]?.value ?? "");
+        // kintone DATETIME は分精度で保存される。この対象レコードの
+        // runner_execution_started_at は自分だけが書くため、双方を分単位へ
+        // 正規化した一致で今回の UPDATE の永続化確認として十分である。
+        const expectedMinute = toDateTimeMinute(value);
+        if (expectedMinute !== null && toDateTimeMinute(persisted) === expectedMinute) return;
         throw new Error("runner_execution_started_at が書込値と一致しません");
       } catch (confirmError) {
         throw new LockUnavailableError(
@@ -579,4 +583,9 @@ export function expectedLogFieldCodes(): string[] {
 /** kintone DATETIME 形式（ISO 8601 UTC） */
 export function toKintoneDateTime(date: Date): string {
   return date.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function toDateTimeMinute(value: string): number | null {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? Math.floor(timestamp / 60_000) : null;
 }

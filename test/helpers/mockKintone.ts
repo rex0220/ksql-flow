@@ -67,7 +67,7 @@ export class MockKintone {
       const records: StoredRecord[] = [];
       let nextId = 1;
       for (const values of app.records ?? []) {
-        records.push({ id: nextId, revision: 1, values: { ...values } });
+        records.push({ id: nextId, revision: 1, values: normalizeStoredRecord(app.fields, values) });
         nextId += 1;
       }
       this.apps.set(app.id, { def: app, records, nextId });
@@ -229,7 +229,7 @@ export class MockKintone {
       this.validateRecordFields(body.app, record);
       const values: Record<string, string> = {};
       for (const [code, item] of Object.entries(record)) {
-        values[code] = normalizeValue(item.value);
+        values[code] = normalizeStoredValue(entry.def.fields[code], item.value);
       }
       this.enforceUnique(body.app, values, null);
       const stored: StoredRecord = { id: entry.nextId, revision: 1, values };
@@ -266,7 +266,7 @@ export class MockKintone {
         const def = entry.def.fields[field];
         const stored = row.values[field];
         if (def?.type === "NUMBER") return Number(stored) === Number(value);
-        return stored === normalizeValue(value);
+        return stored === normalizeStoredValue(def, value);
       };
       const seen = new Set<string>();
       const plans: Array<{ stored: StoredRecord | undefined; update: (typeof body.records)[number] }> = [];
@@ -285,7 +285,7 @@ export class MockKintone {
         if (field in update.record) {
           throw new MockApiError(400, "CB_VA01", `「updateKey」に指定したフィールドの値は更新できません。`);
         }
-        const dupKey = `${field}:${normalizeValue(value)}`;
+        const dupKey = `${field}:${normalizeStoredValue(entry.def.fields[field], value)}`;
         if (seen.has(dupKey)) {
           throw new MockApiError(400, "GAIA_IQ28", `「updateKey」に指定した条件にあてはまるレコードが重複しています。`);
         }
@@ -296,15 +296,24 @@ export class MockKintone {
       for (const { stored, update } of plans) {
         if (stored !== undefined) {
           const next: Record<string, string> = { ...stored.values };
-          for (const [code, item] of Object.entries(update.record)) next[code] = normalizeValue(item.value);
+          for (const [code, item] of Object.entries(update.record)) {
+            next[code] = normalizeStoredValue(entry.def.fields[code], item.value);
+          }
           this.enforceUnique(body.app, next, stored.id);
           stored.values = next;
           stored.revision += 1;
           results.push({ id: String(stored.id), revision: String(stored.revision), operation: "UPDATE" });
         } else {
           const values: Record<string, string> = {};
-          for (const [code, item] of Object.entries(update.record)) values[code] = normalizeValue(item.value);
-          if (update.updateKey !== undefined) values[update.updateKey.field] = normalizeValue(update.updateKey.value);
+          for (const [code, item] of Object.entries(update.record)) {
+            values[code] = normalizeStoredValue(entry.def.fields[code], item.value);
+          }
+          if (update.updateKey !== undefined) {
+            values[update.updateKey.field] = normalizeStoredValue(
+              entry.def.fields[update.updateKey.field],
+              update.updateKey.value
+            );
+          }
           this.enforceUnique(body.app, values, null);
           const created: StoredRecord = { id: entry.nextId, revision: 1, values };
           entry.nextId += 1;
@@ -323,7 +332,7 @@ export class MockKintone {
       this.validateRecordFields(body.app, update.record);
       const next: Record<string, string> = { ...stored.values };
       for (const [code, item] of Object.entries(update.record)) {
-        next[code] = normalizeValue(item.value);
+        next[code] = normalizeStoredValue(entry.def.fields[code], item.value);
       }
       this.enforceUnique(body.app, next, stored.id);
       stored.values = next;
@@ -470,6 +479,23 @@ function normalizeValue(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (Array.isArray(value)) return JSON.stringify(value);
   return String(value);
+}
+
+function normalizeStoredRecord(
+  definitions: Record<string, MockFieldDef>,
+  values: Record<string, string>
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(values).map(([code, value]) => [code, normalizeStoredValue(definitions[code], value)])
+  );
+}
+
+function normalizeStoredValue(definition: MockFieldDef | undefined, value: unknown): string {
+  const normalized = normalizeValue(value);
+  if (definition?.type !== "DATETIME" || normalized === "") return normalized;
+  const timestamp = Date.parse(normalized);
+  if (!Number.isFinite(timestamp)) return normalized;
+  return new Date(Math.floor(timestamp / 60_000) * 60_000).toISOString().replace(/\.000Z$/, "Z");
 }
 
 class MockApiError extends Error {

@@ -34,14 +34,14 @@ M1-h では次を追加確定した。
 | ID 不正 | 4 ID/出力フラグの全か無か違反、文字種・長さ違反では、入力値の echo によるログ注入を避けるため結果 JSON を出力しない |
 | graceful cancel | 単一 `run` で 1 回目 signal は安全境界まで待ち `CANCELLED` / Exit 3。2 回目は Exit 3 即時終了で結果 JSON 非保証。既存挙動への追加契約 |
 | signal 同時エラー | 結果 JSON は `CANCELLED` 優先。元エラーは SecretMasker 適用対象の JSONL `cancelled_with_error` に記録 |
-| `EXECUTION_STARTED` | RUNNING INSERT 直後の expected revision 1 を指定。UPDATE 応答消失は同一 record ID を再 GET し `runner_execution_started_at` が自値と一致した場合のみ SQL 開始。確認不能は SQL 未開始で fail-closed |
+| `EXECUTION_STARTED` | RUNNING INSERT 直後の expected revision 1 を指定。UPDATE 応答消失は同一 record ID を再 GET し、送信値と `runner_execution_started_at` を双方とも分単位へ正規化して一致した場合のみ SQL 開始。kintone DATETIME は分精度、結果 `startedAt` は秒精度を維持する。確認不能は SQL 未開始で fail-closed。実機検証で確認済み（`docs/internal/m1_verification_record_20260830.md` 項目 4） |
 | error category | `CONFIG / SQL / ASSERT / API / AUTH / TIMEOUT / LOCK / INTERNAL / CANCELLED` の 9 値から開始。additive 互換 |
 | error code | 既定は `VALIDATION_ERROR / SQL_ERROR / ASSERT_VIOLATION / EXECUTION_TIMEOUT / AUTH_ERROR / API_ERROR / LOCK_UNAVAILABLE / INTERNAL_ERROR / CANCELLED / LOCK_CONFLICT`。HTTP は `KINTONE_HTTP_<status>`、再試行枯渇は `RETRY_EXHAUSTED`。エンジン診断 code は原値を維持 |
 | capabilities | トップレベル `ksql-flow capabilities --json`。config・通信不要、正常 Exit 0（引数不備 1）。`resultSchema.$id` と contract を公開 |
 | OS signal 差 | Unix は SIGINT / SIGTERM。Windows は Ctrl+C の SIGINT と Ctrl+Break の SIGBREAK。SIGTERM handler も登録するが Windows console の通常配送対象ではない |
 | canonical JSON | `describe-profile` は全階層のキーを辞書順ソート、余分な空白なし、UTF-8、数値は `JSON.stringify` の JS 標準表現。hash 計算は FlowNet 責務 |
 | schema 配布 | `schema/execution-result-v1.schema.json` を kSQL-Flow 側正本として同梱。`$id` は `https://github.com/rex0220/ksql-flow/blob/main/schema/execution-result-v1.schema.json`、contract は `ksql-flow.execution/v1` |
-| JOB 相関移行 | template v0.4 で `correlation_id / attempt_id / execution_id / job_id / runner_execution_started_at` を非必須・非 unique 追加し、status に `CANCELLED` を追加。standalone は旧 schema と共存、orchestrator は開始前存在検査で fail-closed。既存アプリへの適用は同梱の `scripts/logapp_v04_upgrade.console.js`（ブラウザ Console 実行。レイアウト配置と確認用一覧「FlowNet相関確認」の作成まで自動・冪等） |
+| JOB 相関移行 | template v0.4 で `correlation_id / attempt_id / execution_id / job_id / runner_execution_started_at` を非必須・非 unique 追加し、status に `CANCELLED` を追加。standalone は旧 schema と共存、orchestrator は開始前存在検査で fail-closed。既存アプリへの適用は同梱の `scripts/logapp_v04_upgrade.console.js`（ブラウザ Console 実行。レイアウト配置と確認用一覧「FlowNet相関確認」の作成まで自動・冪等）。適用後は `scripts/logapp_v04_field_acl.console.js` で相関 5 フィールドを Everyone=閲覧のみ にすることを推奨（監査・耐久証跡の人為改変防止。API トークンは Administrator 相当で対象外のためランナー書込は不変） |
 | force-unlock | 下記 2 コマンドと machine-readable schema/Exit を確定。FlowNet はログレコードを直接変更しない |
 | inspect-job | エンジン公開診断 code を無改変で返す。非決定要素は現在 `KSQL1306` のみ。承認済み例外 manifest は FlowNet 責務 |
 
@@ -66,10 +66,10 @@ M1-h では次を追加確定した。
 ### D-22: 耐久 `EXECUTION_STARTED`
 
 - revision 1 付き UPDATE 成功確認 → JSONL `execution_started` → 最初の SQL 文、の順序をリクエスト列で試験済み。
-- JOB 値、Execution Result `startedAt`、JSONL 時刻は kintone DATETIME 精度に正規化して一致する。
+- kintone DATETIME は分精度のため、JOB 値は分精度、Execution Result `startedAt` と JSONL 時刻は秒精度を維持し、三者は分単位で一致する。実機検証で確認済み（`docs/internal/m1_verification_record_20260830.md` 項目 4）。
 - UPDATE 失敗時はデータ API 0 件、`LOCK_UNAVAILABLE` / Exit 3 / `executionStarted=false`、ロック解放を試験済み。
 - PUT 応答消失後の再 GET 一致なら続行、不一致・照会不能なら SQL 未実行で fail-closed の両分岐を試験済み。
-- 実 kintone E2E とプロセス実 signal/kill は未実施。本ドラフトだけで D-22 を最終クローズしない。
+- 実 kintone E2E は実施済み（`docs/internal/m1_verification_record_20260830.md` 項目 4）。プロセス実 signal/kill は未実施のため、本ドラフトだけで D-22 を最終クローズしない。
 
 ### D-23: inspect-job と静的検出限界
 

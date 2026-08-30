@@ -61,6 +61,10 @@ function readResult(file: string): ExecutionResult {
   return result;
 }
 
+function toMinute(value: string): number {
+  return Math.floor(new Date(value).getTime() / 60_000);
+}
+
 function isExecutionStartedPut(input: string | URL | Request, init?: RequestInit): boolean {
   const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
   if ((init?.method ?? "GET").toUpperCase() !== "PUT" || !url.pathname.endsWith("/records.json")) return false;
@@ -158,7 +162,7 @@ test("orchestrator JOB と JSONL 全イベントへ相関値を記録し、書�
   expect(fieldGets).toHaveLength(1);
 });
 
-test("耐久 EXECUTION_STARTED を SQL より先に記録し、JOB 値・結果 startedAt・JSONL 順序を一致させる", async () => {
+test("耐久 EXECUTION_STARTED を SQL より先に記録し、JOB 値は結果 startedAt と分単位で一致させる", async () => {
   world = buildWorld({ orders: [] });
   const file = writeJob(world, "01_monthly.sql", SAMPLE_JOB);
   const target = path.join(world.dir, "durable-start.json");
@@ -166,8 +170,8 @@ test("耐久 EXECUTION_STARTED を SQL より先に記録し、JOB 値・結果 
   expect(await runCommand(world.profile, file, options(target))).toBe(EXIT.OK);
   const result = readResult(target);
   const job = logRecords(world).find((record) => record.record_type === "JOB");
-  expect(job?.runner_execution_started_at).toBe(toKintoneDateTime(new Date(result.startedAt!)));
-  expect(new Date(job!.runner_execution_started_at).getTime()).toBe(new Date(result.startedAt!).getTime());
+  expect(job?.runner_execution_started_at).toMatch(/:00Z$/);
+  expect(toMinute(job!.runner_execution_started_at)).toBe(toMinute(result.startedAt!));
 
   const markerPutIndex = world.mock.requests.findIndex((request) => {
     if (request.method !== "PUT" || request.appId !== 999) return false;
@@ -226,8 +230,9 @@ test("EXECUTION_STARTED UPDATE の応答消失後、同一レコード GET で�
   expect(await runCommand(world.profile, file, options(target, { baseFetch: loseDurablePutResponse() }))).toBe(EXIT.OK);
   const result = readResult(target);
   expect(result).toMatchObject({ resultCode: "NO_DATA", executionStarted: true, exitCode: EXIT.OK });
-  expect(logRecords(world).find((record) => record.record_type === "JOB")?.runner_execution_started_at)
-    .toBe(toKintoneDateTime(new Date(result.startedAt!)));
+  const persisted = logRecords(world).find((record) => record.record_type === "JOB")?.runner_execution_started_at;
+  expect(persisted).toMatch(/:00Z$/);
+  expect(toMinute(persisted!)).toBe(toMinute(result.startedAt!));
   expect(world.mock.requests.some((request) =>
     request.method === "GET" &&
     request.appId === 999 &&
