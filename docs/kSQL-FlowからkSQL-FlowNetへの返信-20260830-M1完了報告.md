@@ -121,3 +121,9 @@ FlowNet 側には、job ID / describe-profile 照合、`KSQL1306` 例外承認�
 任意の残項目（Ctrl+Break 実コンソール・rollback 実削除・ロック競合の実機再現 = FlowNet D-11 実測と単体試験で担保済み）は Phase 0 受入に影響しない。
 
 本書はオーナー承認済みの確定版である（2026-08-30）。FlowNet 側で Contract v1 の ACCEPTED 昇格と FDR D-22/D-23/D-26 のクローズ審議をお願いしたい。
+
+---
+
+## 追記(2026-08-30): FlowNet 受理・M1 クローズ
+
+FlowNet が本報告を受理し審議完了(オーナー承認、ksql-flownet main `b5f0a82`)。Execution Contract v1 は **ACCEPTED** へ昇格(テストは FlowNet 側でも独立再実行し全合格を確認)。FDR D-22 は DECIDED+凍結ゲートチェック、D-23/D-26 も DECIDED 化(残ゲートは FlowNet 側作業 FN-07/FN-12 完了時)。kintone DATETIME 分精度の実機発見は契約 §8.1 へ反映された。受入基準の FlowNet 責務は FN-09/FN-12、テンプレート同梱+ACL 案内(Q14)は FlowNet M7 で対応予定。**M1 はクローズ。** 今後は FlowNet M3(repository)→M4 以降の executor 統合時に、実機 E2E(単体 run との lock 競合試験等)で再連携の予定。
