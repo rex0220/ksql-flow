@@ -361,6 +361,17 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
   } catch (error) {
     // createExecutionContext / executeStatement の同期系エラー
     if (error instanceof CancelledError || cancellationRequested(params.cancellation)) {
+      if (!(error instanceof CancelledError)) {
+        // signal を最終結果で優先しても、同時発生した真の失敗は監査から失わない。
+        // JsonlLogger が SecretMasker を適用するため、結果 JSON は CANCELLED のまま保てる。
+        env.jsonl.append("cancelled_with_error", {
+          job: job.name,
+          signal: params.cancellation?.signal ?? null,
+          originalErrorCode: errorCode(error) ?? null,
+          originalErrorMessage: errorMessage(error),
+          originalErrorMessages: errorMessages(error),
+        });
+      }
       status = "CANCELLED";
       exitCode = EXIT.RUNTIME;
       errorText = cancellationMessage(params.cancellation);
@@ -449,6 +460,16 @@ function errorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null) return undefined;
   const code = (error as { code?: unknown }).code;
   return typeof code === "string" ? code : undefined;
+}
+
+function errorMessages(error: unknown): string[] {
+  const messages: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 10 && current != null; depth++) {
+    messages.push(errorMessage(current));
+    current = typeof current === "object" ? (current as { cause?: unknown }).cause : undefined;
+  }
+  return messages;
 }
 
 function safeUser(): string {

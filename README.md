@@ -114,12 +114,20 @@ ksql-flow validate --check-logapp                  # ログアプリの定義検
 ksql-flow validate-all <jobsDir> [--strict]        # 一括検証（CI 用）
 ksql-flow run -f <file.sql> [--as-of ISO8601]      # 単一ジョブ実行
               [--dry-run [--sample 1..50] [--json]]
+              [--result-json <path|-> --correlation-id <id>
+               --attempt-id <id> --expected-job-id <id>]
 ksql-flow run-all <jobsDir>                        # ディレクトリ一括実行（ファイル名順 + depends_on）
                 [--dry-run [--sample 1..50] [--json]]
                 [--resume | --from f | --only f]
                 [--stop-on-error | --continue-on-error]
 ksql-flow unlock                                   # 同一 profile の全 RUNNING を一覧表示後に解除
 ksql-flow init-logapp [--name アプリ名]            # ログアプリの自動作成（要 password 認証。通常はテンプレート推奨）
+ksql-flow capabilities --json                      # 対応契約・機能を通信なしで表示
+ksql-flow describe-profile --profile <p> --config <path> --json
+ksql-flow inspect-job -f <file.sql> --profile <p> --config <path> --json
+ksql-flow inspect-lock --job-key <key> --profile <p> --config <path> --json
+ksql-flow force-unlock-job --job-key <key> --reason <text> --confirmed-by <name>
+              --evidence-ref <uri> --profile <p> --config <path> --json
 ```
 
 全コマンド共通フラグ: `--profile <name>` `--config <path>`。`--max-api-calls N` / `--lock local-only` / `--force-unlock` は run / run-all 専用です。
@@ -127,8 +135,9 @@ ksql-flow init-logapp [--name アプリ名]            # ログアプリの自�
 * `--as-of`: 実行基準時刻の上書き（過去日付での再集計 = バックフィル）。`@NOW()` / `@TODAY()` / `@MONTH_START()` / `@NEXT_MONTH_START()` に反映されます。**`@` なしの `TODAY()` 等は kintone サーバー評価のため as-of の対象外**です（検証時に KSQL1306 警告）。
 * `--resume`: 直近バッチの FAILED / ABORTED / TIMEOUT / 失敗起因の SKIPPED / RUNNING と、JOB レコードがない未着手ジョブのみを、**元の as-of を引き継いで**再実行します。`--from` / `--only` の選抜外として記録された `SKIPPED (filtered)` は再実行しません（ログアプリが正・`.ksql/state-<profile>.json` はフォールバック）。
 * `--dry-run`: read-only 文を実行し、DML は実レコードとの差分プレビューに置き換えます（書込ゼロ）。ASSERT 違反は `ABORTED`（Exit 2）、EXIT SUCCESS IF 成立は `NO_DATA`（Exit 0）として本実行と同じゲートになります。読み取り API は実消費するため `limits.maxApiCalls` が適用されます。`--sample N`（既定 5、1〜50）と `--json`（CI / PR コメント用の単一 JSON）を併用できます。
+* `--result-json` / `--correlation-id` / `--attempt-id` / `--expected-job-id`: FlowNet 等から単一 `run` を呼ぶ orchestrator モードです。4 つは全か無かで、`--result-json -` は stdout、path は既存ファイルを上書きせず atomic に結果を書きます。ID は `[A-Za-z0-9._:-]` の 1〜128 文字、expected job ID は SQL の `@ksql name` と一致が必要です。
 * `--lock local-only`: `logApp` 未設定時は ConfigError（Exit 1）、設定済みログアプリへ到達できない場合は Exit 3 として、既定では何も実行せず停止します。このフラグで「ローカルロックのみで続行」を明示的に許可できます（警告を表示）。
-* `unlock` / `--force-unlock`: 解除対象は **同一プロファイルの全 RUNNING レコード**です。解除前に jobKey・開始時刻・件数を表示します。有効な別ジョブも対象になり得るため必ず一覧を確認してください。batchId / jobKey 指定解除は v0.1 では未対応です。
+* `unlock` / `--force-unlock`: 人間向けの既存経路で、解除対象は **同一プロファイルの全 RUNNING レコード**です。対象限定の自動回復には、読取専用 `inspect-lock` と停止確認入力が必須の `force-unlock-job` を使用します。
 * CLI はコマンド別 allowlist で未知・不適用 flag、余分な positional、競合 flag を API 呼び出し前に Exit 1 で拒否します。`--resume` / `--from` / `--only` は相互排他、`--json` / `--sample` は `--dry-run` 専用です。
 
 CI の最小構成:

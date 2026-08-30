@@ -341,9 +341,11 @@ describe("init-logapp / --check-logapp（設計書 付録 B）", () => {
 describe("ログアプリの DROP_DOWN query", () => {
   test("record_type / status は実 kintone が受理する IN 演算子を使う", async () => {
     const queries: string[] = [];
+    const fieldLists: string[][] = [];
     const client = {
-      getRecords: jest.fn(async (request: { query?: string }) => {
+      getRecords: jest.fn(async (request: { query?: string; fields?: string[] }) => {
         queries.push(request.query ?? "");
+        fieldLists.push(request.fields ?? []);
         return { records: [] };
       }),
     };
@@ -356,5 +358,6 @@ describe("ログアプリの DROP_DOWN query", () => {
     expect(queries[0]).toContain('record_type in ("BATCH")');
     expect(queries[1]).toContain('record_type in ("JOB")');
     expect(queries[2]).toContain('status in ("RUNNING")');
+    expect(fieldLists[2]).toEqual(expect.arrayContaining(["$revision", "host", "script_name"]));
   });
 });

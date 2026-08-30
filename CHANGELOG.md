@@ -2,6 +2,15 @@
 
 このプロジェクトの主な変更を記録します。
 
+## [Unreleased] - v0.7.0 予定
+
+- FlowNet 等の orchestrator から単一 `run` を安全に呼び出す 4 フラグ（`--result-json` / `--correlation-id` / `--attempt-id` / `--expected-job-id`）を追加。Execution Result v1 の正本 JSON Schema を同梱し、stdout 純 JSON、path の atomic 書込・既存ファイル上書き拒否、ID 照合、controlled failure の機械可読結果を契約化しました。
+- 互換性・設定・ジョブを通信なしで検査する `capabilities --json` / `describe-profile --json` / `inspect-job --json` を追加。orchestrator 実行では最初の SQL 文直前にログアプリへ耐久 `EXECUTION_STARTED` を revision 付きで記録し、確認不能時は SQL 未開始で fail-closed します。
+- 単一 `run` の graceful cancel を追加。1 回目の SIGINT / SIGTERM / SIGBREAK は進行中 request と確定済み chunk を待って `CANCELLED`（Exit 3）を返し、2 回目は即時終了します。signal と真のエラーが同時発生した場合も結果は `CANCELLED` を優先し、元エラーはローカル JSONL に残します。
+- 対象限定のロック診断・回復コマンド `inspect-lock --json` / `force-unlock-job --json` を追加。停止確認者・理由・証拠 URI を必須とし、revision 固定の単一 UPDATE と再照会で解除結果を機械可読に返します。既存の人間向け `unlock` / `--force-unlock` は変更しません。
+- 同梱ログアプリテンプレートを v0.4 に更新。任意の相関フィールド 5 個と `CANCELLED` 選択肢を追加しました。旧ログアプリは standalone 実行で引き続き利用でき、orchestrator 実行だけは必要フィールド欠落時に SQL 未開始で拒否します。
+- 既存の `run` / `run-all` / dry-run / resume / Exit Code は後方互換です。新しい orchestrator 4 フラグは全て未指定なら従来動作、いずれかを指定した場合だけ 4 つ全てを要求します。package version は本節追加時点では変更していません。
+
 ## [0.6.0] - 2026-08-28
 
 - `run-all --resume-batch <batch_id>` を追加。指定 BATCH だけを再開元にし、元の as-of と失敗・未着手ジョブ選抜を引き継ぎます。BATCH の 0 件／複数件、profile 不一致、選抜フラグ併用は Exit 1。ログアプリ取得失敗時は `state.json` へフォールバックせず Exit 3 で fail-closed します。

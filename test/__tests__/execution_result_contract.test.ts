@@ -90,6 +90,15 @@ describe("Execution Result v1 canonical schema", () => {
     expectSchemaValid(future);
   });
 
+  test("FlowNet 相当の同梱 schema 検証は additive unknown field を受理する", () => {
+    const future = readFixture("failure.json") as ExecutionResult & Record<string, unknown>;
+    future.futureProducerField = { formatVersion: 2 };
+    if (future.error !== null) {
+      (future.error as typeof future.error & Record<string, unknown>).futureErrorField = "additive";
+    }
+    expectSchemaValid(future);
+  });
+
   test("rejects an unknown resultCode when status and Exit are inconsistent", () => {
     const future = readFixture("failure.json") as ExecutionResult;
     future.resultCode = "FUTURE_FAILURE";

@@ -180,6 +180,53 @@ SELECT 顧客コード FROM LAPP_受注;
   expect(logRecords(world)[0].status).toBe("CANCELLED");
 });
 
+test("signal と真のエラーが同時発生しても結果は CANCELLED、元メッセージは JSONL に残す", async () => {
+  world = buildWorld({ orders: [] });
+  const file = writeJob(world, "01_cancel_error.sql", `-- @ksql name: cancel_error
+-- @ksql dialect: 1
+SELECT 顧客コード FROM LAPP_受注;
+`);
+  const resultPath = path.join(world.dir, "cancel-error-result.json");
+  let emitted = false;
+  const failingFetch: typeof fetch = async (input, init) => {
+    const body = bodyOf(init) as {
+      app?: number;
+      records?: Array<{ record?: Record<string, { value?: unknown }> }>;
+    };
+    if (
+      init?.method === "PUT" &&
+      body.app === 999 &&
+      body.records?.[0]?.record?.runner_execution_started_at !== undefined
+    ) {
+      if (!emitted) {
+        emitted = true;
+        emit("SIGINT");
+      }
+      throw new TypeError("marker transport exploded");
+    }
+    return world!.mock.fetch(input, init);
+  };
+
+  expect(await runCommand(world.profile, file, {
+    resultJson: resultPath,
+    correlationId: "network:cancel-error",
+    attemptId: "attempt:cancel-error",
+    expectedJobId: "cancel_error",
+    asOf: AS_OF,
+    baseFetch: failingFetch,
+    out: world.out,
+  })).toBe(EXIT.RUNTIME);
+
+  const result = JSON.parse(fs.readFileSync(resultPath, "utf8")) as Record<string, unknown>;
+  expect(result).toMatchObject({ status: "CANCELLED", resultCode: "CANCELLED", exitCode: 3 });
+  const logFile = path.join(world.profile.logging.localDir, `${String(result.executionId)}.jsonl`);
+  const events = fs.readFileSync(logFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  expect(events).toContainEqual(expect.objectContaining({
+    event: "cancelled_with_error",
+    originalErrorMessages: expect.arrayContaining(["marker transport exploded"]),
+  }));
+});
+
 test("write chunk 完了時の cancel は完了 chunk を確定し、次の書込 API を発行しない", async () => {
   world = buildWorld({});
   const file = writeJob(world, "01_chunk_cancel.sql", upsertValuesJob(250));

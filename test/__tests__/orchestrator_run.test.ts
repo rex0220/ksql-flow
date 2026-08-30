@@ -341,6 +341,46 @@ test("path 出力は同一ディレクトリの完成済み一時 JSON を fsync
   expect(fs.readdirSync(world.dir).filter((name) => name.includes(".tmp-"))).toEqual([]);
 });
 
+test("stdout が EPIPE でも path 出力は stdout に触れず完成する", () => {
+  world = buildWorld();
+  const target = path.join(world.dir, "result.json");
+  const fixture = JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, "../fixtures/execution-result/success.json"), "utf8")
+  ) as ExecutionResult;
+  const brokenStdout = {
+    write: jest.fn(() => {
+      const error = new Error("broken pipe") as NodeJS.ErrnoException;
+      error.code = "EPIPE";
+      throw error;
+    }),
+  };
+
+  writeExecutionResult(target, fixture, brokenStdout as Pick<NodeJS.WriteStream, "write">);
+  expect(brokenStdout.write).not.toHaveBeenCalled();
+  expect(readResult(target)).toEqual(fixture);
+});
+
+test("stdout 書込失敗は writer が通知し、run は実行結果の Exit を維持する", async () => {
+  world = buildWorld();
+  const file = writeJob(world, "01_monthly.sql", SAMPLE_JOB);
+  const error = new Error("broken pipe") as NodeJS.ErrnoException;
+  error.code = "EPIPE";
+  const stdout = jest.spyOn(process.stdout, "write").mockImplementation(() => {
+    throw error;
+  });
+  try {
+    expect(() => writeExecutionResult("-", JSON.parse(
+      fs.readFileSync(path.resolve(__dirname, "../fixtures/execution-result/success.json"), "utf8")
+    ) as ExecutionResult)).toThrow(error);
+
+    const code = await runCommand(world.profile, file, options("-", { out: world.out }));
+    expect(code).toBe(EXIT.OK);
+    expect(world.output.join("\n")).toContain("Execution Result を出力できません: broken pipe");
+  } finally {
+    stdout.mockRestore();
+  }
+});
+
 test("既存 result path は内容を変更せず API 呼出し前に Exit 1 で拒否する", async () => {
   world = buildWorld();
   const file = writeJob(world, "01_monthly.sql", SAMPLE_JOB);

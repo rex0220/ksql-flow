@@ -150,7 +150,7 @@ JOB レコードへ runner_execution_started_at（+相関 ID）を UPDATE し、
 3. 停止確認は**入力**（kSQL-Flow が旧プロセスの停止を自ら証明できないため、確認済みであることの表明 + 証拠参照を要求し、解除レコードの `log_detail` へ全入力を記録する）。D-26 のとおり FlowNet は lock レコードを直接変更しない
 4. 解除は既存 `recoverStale` 方式（終端 status + `job_key` クリア + `job_key_done` 退避の単一 UPDATE — D-26 追記の実測済み方式）を踏襲する。M1-g 実装判断は **既存選択肢 `FAILED` + `log_detail` 先頭の `LOCK_RECOVERY` 監査 JSON**。自動 stale 回収の `TIMEOUT` と判別でき、status 選択肢追加・旧ログアプリ移行を避ける
 5. 結果 JSON（kind 例: `LOCK_RECOVERY_RESULT`、formatVersion 1）: 対象 job_key・record id・outcome（`RELEASED` / `NOT_FOUND` / `NOT_RUNNING` / `CONFLICT` / `UNCONFIRMED` 等の安定 code）・解除前後の状態。Exit（提案・返信文書へ記録): RELEASED=0 / 入力不備=1 / 照会不能・応答消失で未確定=3 / 対象が生きている競合=5
-6. 応答消失時: 解除 UPDATE の応答を確認できなければ job_key を再 GET し、クリア済みを確認できた場合だけ `RELEASED`。確認できなければ `UNCONFIRMED`（Exit 3）とし、`inspect-lock` での再照会手順を結果 JSON と文書に明記
+6. 応答消失時: 解除 UPDATE の応答を確認できなければ job_key と同一 record ID の監査内容を再 GET し、クリア済みかつ今回の `LOCK_RECOVERY` 監査と一致した場合だけ `RELEASED`。409 競合後に他者が解放して監査が一致しない場合は `NOT_RUNNING`、確認不能は `UNCONFIRMED`（Exit 3）とし、`inspect-lock` での再照会手順を結果 JSON と文書に明記
 
 ## 10. テストと受入基準の対応
 
@@ -176,20 +176,20 @@ JOB レコードへ runner_execution_started_at（+相関 ID）を UPDATE し、
 
 ## 12. 契約 §13 未決事項への決定（返信文書へ記録する一覧）
 
-| §13 項目 | 本起票の提案 |
+| §13 項目 | 実装確定値（M1-h） |
 | --- | --- |
-| result-json 上書き規則 | 既存ファイルは起動時に拒否（§4-3） |
-| executionId 発行時点・形式 | 既存 batchId（UUID v4）・プロセス起動時（§3） |
-| graceful cancel の Exit 3 互換 | 追加契約であり既存挙動の変更なし（§8-3） |
-| EXECUTION_STARTED の revision・応答消失・照会 | 再 GET 照合方式（§7） |
-| error code の最小安定集合 | category 9 値 + code 一覧（§3、実装で確定） |
-| capability command の配置と Exit | トップレベル `capabilities`・Exit 0（§5-1） |
-| Windows Ctrl+C / CTRL_BREAK | SIGINT / SIGBREAK 捕捉・SIGTERM 非対応明記（§8-5） |
-| JSON Schema 配布 | 本リポジトリ `schema/` に同梱（§3） |
-| JOB ログ相関フィールド移行 | template v0.4・非必須追加・存在検査 + fail-closed（§6） |
-| force-unlock の CLI・schema・Exit・照会 | §9 の 2 コマンド案 |
-| describe-profile canonical JSON | 辞書順ソート + 空白なし（§5 末尾） |
-| inspect-job 検査 code・例外 schema | エンジン診断由来の code 一覧を実装で確定（§5-3）。承認済み例外 manifest は FlowNet 側 |
+| result-json 上書き規則 | path の既存ファイルは API 呼出前に拒否。stdout は `-`。path は同一ディレクトリの一時ファイルを fsync 後 atomic rename |
+| executionId 発行時点・形式 | `createRunnerEnv()` の既存 batchId（UUID v4）をプロセス起動時に発行し、executionId として共用 |
+| graceful cancel の Exit 3 互換 | 単一 `run` の追加契約。1 回目は `CANCELLED` / Exit 3、2 回目は Exit 3 即時終了。signal 同時エラーも結果は CANCELLED、元メッセージは JSONL |
+| EXECUTION_STARTED の revision・応答消失・照会 | RUNNING INSERT 直後の revision 1 を指定して UPDATE。応答消失は同一 record ID を再 GET し自値一致時だけ続行、確認不能は SQL 未開始で fail-closed |
+| error code の最小安定集合 | category は `CONFIG / SQL / ASSERT / API / AUTH / TIMEOUT / LOCK / INTERNAL / CANCELLED`。既定 code は `VALIDATION_ERROR / SQL_ERROR / ASSERT_VIOLATION / EXECUTION_TIMEOUT / AUTH_ERROR / API_ERROR / LOCK_UNAVAILABLE / INTERNAL_ERROR / CANCELLED / LOCK_CONFLICT`、HTTP は `KINTONE_HTTP_<status>`、再試行枯渇は `RETRY_EXHAUSTED`、エンジン診断 code は原値を維持 |
+| capability command の配置と Exit | トップレベル `capabilities --json`。config・通信不要、正常 Exit 0（引数不備のみ 1） |
+| Windows Ctrl+C / CTRL_BREAK | Windows は SIGINT / SIGBREAK を捕捉。SIGTERM handler も登録するが Windows の通常 console 配送対象ではない。Unix は SIGINT / SIGTERM、SIGBREAK は登録しない |
+| JSON Schema 配布 | `schema/execution-result-v1.schema.json` を正本として同梱。`$id` と `x-contract: ksql-flow.execution/v1` を capabilities から参照可能 |
+| JOB ログ相関フィールド移行 | template v0.4 で相関 5 フィールドを非必須・非 unique 追加し `CANCELLED` 選択肢追加。standalone は旧 schema 互換、orchestrator は存在検査して欠落時 fail-closed |
+| force-unlock の CLI・schema・Exit・照会 | `inspect-lock` と `force-unlock-job` を実装。後者は停止確認 3 入力必須、`LOCK_RECOVERY_RESULT` v1、`RELEASED/NOT_FOUND/NOT_RUNNING=0`、入力不備 1、`UNCONFIRMED=3`、`CONFLICT=5`。応答消失は job_key と同一 record の監査内容を再照合 |
+| describe-profile canonical JSON | 全階層のキーを辞書順ソート、余分な空白なし、UTF-8、数値は JSON.stringify の JS 標準表現 |
+| inspect-job 検査 code・例外 schema | 公開 code は `KSQL1001`〜`1006` / `1101` / `1201`〜`1203` / `1301`〜`1306`。非決定要素は `KSQL1306` のみ。通信なしのため schema 依存 `KSQL1302/1303` は検出不能。承認済み例外 manifest は FlowNet 側 |
 
 ## 13. 疑義の裁定結果（解決済み）
 

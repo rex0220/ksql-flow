@@ -297,12 +297,13 @@ export class LogAppClient {
       authenticationSubject: `profile:${params.profileName}`,
       executedAt: toKintoneDateTime(params.executedAt),
     };
+    const auditDetail = truncateDetail(`LOCK_RECOVERY ${JSON.stringify(audit)}`);
     const fields = await this.writableFields({
       status: "FAILED",
       job_key: "",
       job_key_done: params.observed.jobKey,
       finished_at: toKintoneDateTime(params.executedAt),
-      log_detail: truncateDetail(`LOCK_RECOVERY ${JSON.stringify(audit)}`),
+      log_detail: auditDetail,
     });
 
     try {
@@ -325,6 +326,11 @@ export class LogAppClient {
       try {
         const after = await this.findByJobKey(params.observed.jobKey);
         if (after === null) {
+          // PUT 適用後の応答喪失と、409 競合で他者が先に解放した場合を、
+          // 同一 record ID に残った監査内容で区別する。
+          if (!(await this.hasForceUnlockAudit(current.id, current.jobKey, auditDetail))) {
+            return "NOT_RUNNING";
+          }
           this.jsonl.append("job_lock_force_released", {
             recordId: current.id,
             jobKey: current.jobKey,
@@ -342,6 +348,19 @@ export class LogAppClient {
         return "UNCONFIRMED";
       }
     }
+  }
+
+  private async hasForceUnlockAudit(recordId: string, jobKey: string, auditDetail: string): Promise<boolean> {
+    const result = await this.client.getRecords({
+      app: this.appId,
+      query: `$id = ${Number(recordId)} limit 1`,
+      fields: ["$id", "job_key", "job_key_done", "log_detail"],
+    });
+    const record = result.records[0];
+    return record !== undefined &&
+      String(record["job_key"]?.value ?? "") === "" &&
+      String(record["job_key_done"]?.value ?? "") === jobKey &&
+      String(record["log_detail"]?.value ?? "") === auditDetail;
   }
 
   private async findByRecordId(recordId: string): Promise<RunningRecord | null> {
@@ -538,7 +557,7 @@ export class LogAppClient {
     const result = await this.client.getRecords({
       app: this.appId,
       query: `status in ("RUNNING") and profile = "${escapeQueryValue(profile)}" limit 500`,
-      fields: ["$id", "status", "started_at", "batch_id", "job_key"],
+      fields: ["$id", "$revision", "status", "started_at", "batch_id", "job_key", "host", "script_name"],
     });
     return result.records.map((record) => ({
       id: String(record["$id"]?.value ?? ""),

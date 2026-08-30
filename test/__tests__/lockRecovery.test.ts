@@ -189,6 +189,27 @@ describe("KF-06 force-unlock-job", () => {
     expect(logRecords(world)[0]).toMatchObject({ status: "RUNNING", job_key: JOB_KEY });
   });
 
+  test("409 競合後に他者が job_key を解放済みなら監査なし RELEASED ではなく NOT_RUNNING", async () => {
+    world = buildWorld({ logRecords: [runningRecord()] });
+    let changedByOther = false;
+    const racingFetch: typeof fetch = async (request, init) => {
+      const url = new URL(typeof request === "string" ? request : request instanceof URL ? request.toString() : request.url);
+      if (!changedByOther && init?.method === "PUT" && url.pathname.endsWith("/records.json")) {
+        changedByOther = true;
+        world!.mock.app(LOG_APP).records[0].revision += 1;
+        world!.mock.app(LOG_APP).records[0].values.status = "SUCCESS";
+        world!.mock.app(LOG_APP).records[0].values.job_key = "";
+      }
+      return world!.mock.fetch(request, init);
+    };
+    const output: Record<string, unknown>[] = [];
+    expect(await forceUnlockJobCommand(world.profile, input, {
+      baseFetch: racingFetch, now: () => NOW, writeJson: (value) => output.push(value),
+    })).toBe(0);
+    expect(output[0]).toMatchObject({ outcome: "NOT_RUNNING" });
+    expect(logRecords(world)[0].log_detail ?? "").not.toContain("LOCK_RECOVERY");
+  });
+
   test("UPDATE 応答消失は再 GET でクリア済みなら RELEASED", async () => {
     world = buildWorld({ logRecords: [runningRecord()] });
     let lost = false;

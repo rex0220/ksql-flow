@@ -672,7 +672,7 @@ CLI はコマンドごとの flag allowlist を持ちます。未知 flag、そ�
 
 `force-unlock-job` は `--job-key` / `--reason` / `--confirmed-by` / `--evidence-ref` / `--profile` / `--config` / `--json` を全て必須とし、欠落・空値・不正 URI は API 呼び出し前に Exit 1 で拒否します。最初の照会で得た record ID / batch_id と、解除直前の record ID GET の値を照合し、その revision を指定した単一 UPDATE で `status = FAILED`、`job_key` クリア、`job_key_done` 退避、`finished_at`、全確認入力・接続 profile・実行時刻を含む `log_detail` を同時に記録します。明示解除は `FAILED + LOCK_RECOVERY` 監査詳細、自動 stale 回収は従来どおり `TIMEOUT` なので判別できます。status 選択肢は追加しません。
 
-解除結果は `kind: LOCK_RECOVERY_RESULT` / `formatVersion: 1` とし、jobKey / recordId / outcome / before（batchId / startedAt / host）/ executedAt を返します。outcome と Exit は `RELEASED = 0`、`NOT_FOUND = 0`、`NOT_RUNNING = 0`、`CONFLICT = 5`、`UNCONFIRMED = 3` です。UPDATE 応答を確認できない場合は job_key を再 GET し、クリア済みなら `RELEASED`、確認できなければ `UNCONFIRMED` として `inspect-lock` による再照会を `nextAction` で指示します。FlowNet は D-26 に従ってロックレコードを直接変更せず、この 2 コマンドだけをロック回復経路として使用します。既存の人間向け `unlock` / `--force-unlock` の全 RUNNING 解除契約は変更しません。
+解除結果は `kind: LOCK_RECOVERY_RESULT` / `formatVersion: 1` とし、jobKey / recordId / outcome / before（batchId / startedAt / host）/ executedAt を返します。outcome と Exit は `RELEASED = 0`、`NOT_FOUND = 0`、`NOT_RUNNING = 0`、`CONFLICT = 5`、`UNCONFIRMED = 3` です。UPDATE 応答を確認できない場合は job_key と同一 record ID の監査内容を再 GET し、クリア済みかつ今回の `LOCK_RECOVERY` 監査と一致した場合だけ `RELEASED` とします。409 競合後に他者が先に解放して監査が一致しない場合は `NOT_RUNNING`、確認不能は `UNCONFIRMED` として `inspect-lock` による再照会を `nextAction` で指示します。FlowNet は D-26 に従ってロックレコードを直接変更せず、この 2 コマンドだけをロック回復経路として使用します。既存の人間向け `unlock` / `--force-unlock` の全 RUNNING 解除契約は変更しません。
 
 ### 10.2 dry-run の出力仕様（差分プレビュー）
 
@@ -720,7 +720,7 @@ CLI はコマンドごとの flag allowlist を持ちます。未知 flag、そ�
 * run-all 開始時のバッチロック取得失敗（5.5-3）は何も実行せず **5** を返します。run-all 実行中に単発実行と個別ジョブのロックが衝突した場合、当該ジョブは `SKIPPED`（理由 LOCKED）とし、集約規則では 5 として扱います。
 * CI / スケジューラ側はこのコードで分岐できます（例: Exit 2 は業務データ起因なので担当部門へ、Exit 3 は基盤起因なので情シスへ通知）。
 
-単一 `run` の実行中は `SIGINT` / `SIGTERM` / `SIGBREAK` を捕捉します。1 回目は、進行中の API request の完了を待ち、次の SQL 文または次の書込 chunk を開始せず、結果とログの確定後にロックを解放して `CANCELLED`（Exit 3）を返します。2 回目は forced termination として即時終了し、Execution Result JSON を保証しません。利用者起因の `CANCELLED` では `onFailure` 通知を送らず、heartbeat は `on: "always"` の場合だけ送ります。
+単一 `run` の実行中は `SIGINT` / `SIGTERM` / `SIGBREAK` を捕捉します。1 回目は、進行中の API request の完了を待ち、次の SQL 文または次の書込 chunk を開始せず、結果とログの確定後にロックを解放して `CANCELLED`（Exit 3）を返します。signal と真のエラーが同時発生した場合も結果は `CANCELLED` を優先し、元エラーはマスク後にローカル JSONL の `cancelled_with_error` へ残します。2 回目は forced termination として即時終了し、Execution Result JSON を保証しません。利用者起因の `CANCELLED` では `onFailure` 通知を送らず、heartbeat は `on: "always"` の場合だけ送ります。
 
 Windows では Ctrl+C（`SIGINT`）と CTRL_BREAK（`SIGBREAK`）を捕捉できますが、`SIGTERM` は Windows プロセスへ配送されません。Unix では `SIGINT` / `SIGTERM` を捕捉します。`run-all` は graceful cancel の対象外で、従来の signal 挙動を維持します。
 
