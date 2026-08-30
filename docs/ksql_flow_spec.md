@@ -321,7 +321,7 @@ ksql run -f jobs/02_calc_daily_sales.sql --profile prod --as-of "2026-08-01T00:0
 2. **分散ロック（ログアプリ方式）**: 実行開始時にログアプリへ `status = RUNNING` のレコードを先行 INSERT する。`job_key` フィールドを**重複禁止**に設定しておくことで、別ホストからの多重起動は INSERT 失敗（400 Bad Request）として検知され、Exit 5（`LOCKED`）で即座に停止する（並行性の保証範囲は本節末尾「ロックの保証範囲」を参照）。
 3. **バッチロック**: `run-all` は開始時に `job_key = {profile}:__batch__` の BATCH レコードを先行 INSERT し、**同一プロファイルの run-all 同時実行**を防ぎます（個々のジョブロックはこの傘の下で取得される）。単発 `ksql run` と run-all 内の個別ジョブが衝突した場合は、当該ジョブのみ Exit 5 相当として扱います（→ 10.3）。
 4. **分散ロックを確立できない場合は fail-closed**: 実行**開始時**にログアプリへ到達できない、または RUNNING レコードを INSERT できない場合、既定では何も実行せず `FAILED`（Exit 3、理由 `LOCK_UNAVAILABLE`）で停止します。`--lock local-only` を明示した場合のみ、警告を出した上でローカルロックのみで続行できます。8.3 のローカル JSONL フォールバックは**実行中**のログ書き込み失敗を救済する仕組みであり、開始時のロック確立には適用しません（ここを混同すると排他保証が静かに消えるため、経路を分離します）。
-5. `--force-unlock` または `ksql-flow unlock` で、ハングした前回セッションのロックを明示的に解除できます。**解除対象は batchId / jobKey 単位ではなく、同一プロファイルの全 RUNNING レコード**です。解除前に jobKey・開始時刻・対象件数を一覧表示し、解除の事実もログに記録します。有効な別ジョブを巻き込む blast radius があるため、一覧を確認して使用します。batchId / jobKey 単位の指定解除は v0.1 では非対応です（将来検討）。
+5. `--force-unlock` または `ksql-flow unlock` で、ハングした前回セッションのロックを明示的に解除できます。**解除対象は batchId / jobKey 単位ではなく、同一プロファイルの全 RUNNING レコード**です。解除前に jobKey・開始時刻・対象件数を一覧表示し、解除の事実もログに記録します。有効な別ジョブを巻き込む blast radius があるため、一覧を確認して使用します。これらは人間向けの既存経路です。FlowNet は直接レコードを変更せず、対象限定の回復には 10.1 の `inspect-lock` / `force-unlock-job` だけを使用します。
 
 **`job_key` のライフサイクル規則（重複制約エラーの誤爆防止）**:
 
@@ -656,9 +656,23 @@ ksql-flow describe-profile --profile prod --config ./ksql.config.json --json
 
 # 論理 job ID・engine 診断・検出可能な非決定要素の静的検査
 ksql-flow inspect-job -f jobs/01_sync_master.sql --profile prod --config ./ksql.config.json --json
+
+# FlowNet/orchestrator 用: 指定 job_key のロックを読取専用で照会
+ksql-flow inspect-lock --job-key prod:daily_sales --profile prod --config ./ksql.config.json --json
+
+# FlowNet/orchestrator 用: 停止確認証跡付きで指定 RUNNING 1 件だけを明示解除
+ksql-flow force-unlock-job --job-key prod:daily_sales --reason "旧 worker 停止確認済み" \
+  --confirmed-by flownet-watchdog --evidence-ref incident://INC-2048 \
+  --profile prod --config ./ksql.config.json --json
 ```
 
-CLI はコマンドごとの flag allowlist を持ちます。未知 flag、そのコマンドに不適用な flag、余分な positional、競合 flag は設定ファイル読取・API 呼び出し・ファイル変更より前に usage error（Exit 1）です。`--resume` / `--resume-batch` / `--from` / `--only` は相互排他、`--stop-on-error` / `--continue-on-error` は相互排他です。`run` / `run-all` の `--json` / `--sample` は `--dry-run` 併用時のみ、`capabilities` / `describe-profile` / `inspect-job` は `--json` 必須、`--check-logapp` は `validate` でのみ受理します。これら 3 つの JSON コマンドは kintone 通信を行わず、stdout へ JSON object 1 個と LF だけを出力します。`describe-profile` は全階層のキーを辞書順にした空白なしの canonical JSON で、認証情報を含みません。`inspect-job` の診断 code はエンジン公開 code をそのまま返し、静的検査だけで冪等性を証明しません。
+CLI はコマンドごとの flag allowlist を持ちます。未知 flag、そのコマンドに不適用な flag、余分な positional、競合 flag は設定ファイル読取・API 呼び出し・ファイル変更より前に usage error（Exit 1）です。`--resume` / `--resume-batch` / `--from` / `--only` は相互排他、`--stop-on-error` / `--continue-on-error` は相互排他です。`run` / `run-all` の `--json` / `--sample` は `--dry-run` 併用時のみ、`capabilities` / `describe-profile` / `inspect-job` / `inspect-lock` / `force-unlock-job` は `--json` 必須、`--check-logapp` は `validate` でのみ受理します。全 JSON コマンドは stdout へ JSON object 1 個と LF だけを出力します。このうち `capabilities` / `describe-profile` / `inspect-job` は kintone 通信を行いません。`describe-profile` は全階層のキーを辞書順にした空白なしの canonical JSON で、認証情報を含みません。`inspect-job` の診断 code はエンジン公開 code をそのまま返し、静的検査だけで冪等性を証明しません。
+
+`inspect-lock` は指定 `job_key` の RUNNING レコードだけを読み取り、record ID / batch_id / started_at / host / script_name を返します。該当 RUNNING がなければ `locked: false` で Exit 0、設定・引数不備は Exit 1、ログアプリへ到達できず状態を確定できない場合は `locked: null` で Exit 3（fail-closed）です。応答消失後の独立した再照会にも同じコマンドを使います。
+
+`force-unlock-job` は `--job-key` / `--reason` / `--confirmed-by` / `--evidence-ref` / `--profile` / `--config` / `--json` を全て必須とし、欠落・空値・不正 URI は API 呼び出し前に Exit 1 で拒否します。最初の照会で得た record ID / batch_id と、解除直前の record ID GET の値を照合し、その revision を指定した単一 UPDATE で `status = FAILED`、`job_key` クリア、`job_key_done` 退避、`finished_at`、全確認入力・接続 profile・実行時刻を含む `log_detail` を同時に記録します。明示解除は `FAILED + LOCK_RECOVERY` 監査詳細、自動 stale 回収は従来どおり `TIMEOUT` なので判別できます。status 選択肢は追加しません。
+
+解除結果は `kind: LOCK_RECOVERY_RESULT` / `formatVersion: 1` とし、jobKey / recordId / outcome / before（batchId / startedAt / host）/ executedAt を返します。outcome と Exit は `RELEASED = 0`、`NOT_FOUND = 0`、`NOT_RUNNING = 0`、`CONFLICT = 5`、`UNCONFIRMED = 3` です。UPDATE 応答を確認できない場合は job_key を再 GET し、クリア済みなら `RELEASED`、確認できなければ `UNCONFIRMED` として `inspect-lock` による再照会を `nextAction` で指示します。FlowNet は D-26 に従ってロックレコードを直接変更せず、この 2 コマンドだけをロック回復経路として使用します。既存の人間向け `unlock` / `--force-unlock` の全 RUNNING 解除契約は変更しません。
 
 ### 10.2 dry-run の出力仕様（差分プレビュー）
 

@@ -82,10 +82,13 @@ function toKintoneRecord(fields: LogRecordFields): Record<string, { value: strin
 
 export interface RunningRecord {
   id: string;
+  revision: number;
   status: string;
   startedAt: string | null;
   batchId: string;
   jobKey: string;
+  host: string;
+  scriptName: string;
 }
 
 /**
@@ -161,16 +164,19 @@ export class LogAppClient {
     const result = await this.client.getRecords({
       app: this.appId,
       query: `job_key = "${escapeQueryValue(jobKey)}" limit 1`,
-      fields: ["$id", "status", "started_at", "batch_id", "job_key"],
+      fields: ["$id", "$revision", "status", "started_at", "batch_id", "job_key", "host", "script_name"],
     });
     const record = result.records[0];
     if (record === undefined) return null;
     return {
       id: String(record["$id"]?.value ?? ""),
+      revision: Number(record["$revision"]?.value ?? 0),
       status: String(record["status"]?.value ?? ""),
       startedAt: record["started_at"]?.value ? String(record["started_at"].value) : null,
       batchId: String(record["batch_id"]?.value ?? ""),
       jobKey,
+      host: String(record["host"]?.value ?? ""),
+      scriptName: String(record["script_name"]?.value ?? ""),
     };
   }
 
@@ -251,6 +257,111 @@ export class LogAppClient {
       log_detail: note,
     });
     this.jsonl.append("stale_lock_recovered", { recordId: record.id, jobKey: record.jobKey });
+  }
+
+  /**
+   * orchestrator 用の対象限定明示解除。
+   *
+   * 検索時の identity を record-id GET で再確認し、その revision を PUT に指定する。
+   * PUT 応答が失われた場合は job_key を再照会し、クリア済みと確認できた場合だけ
+   * RELEASED とする。既存 recoverStale / unlock の挙動には影響させない。
+   */
+  async forceUnlockJob(params: {
+    observed: RunningRecord;
+    reason: string;
+    confirmedBy: string;
+    evidenceRef: string;
+    profileName: string;
+    executedAt: Date;
+  }): Promise<"RELEASED" | "NOT_FOUND" | "NOT_RUNNING" | "CONFLICT" | "UNCONFIRMED"> {
+    const current = await this.findByRecordId(params.observed.id);
+    if (current === null) {
+      const replacement = await this.findByJobKey(params.observed.jobKey);
+      return replacement === null ? "NOT_FOUND" : "CONFLICT";
+    }
+    if (
+      current.id !== params.observed.id ||
+      current.batchId !== params.observed.batchId ||
+      current.jobKey !== params.observed.jobKey
+    ) {
+      return "CONFLICT";
+    }
+    if (current.status !== "RUNNING") return "NOT_RUNNING";
+
+    const audit = {
+      operation: "force-unlock-job",
+      jobKey: params.observed.jobKey,
+      reason: params.reason,
+      confirmedBy: params.confirmedBy,
+      evidenceRef: params.evidenceRef,
+      authenticationSubject: `profile:${params.profileName}`,
+      executedAt: toKintoneDateTime(params.executedAt),
+    };
+    const fields = await this.writableFields({
+      status: "FAILED",
+      job_key: "",
+      job_key_done: params.observed.jobKey,
+      finished_at: toKintoneDateTime(params.executedAt),
+      log_detail: truncateDetail(`LOCK_RECOVERY ${JSON.stringify(audit)}`),
+    });
+
+    try {
+      await this.client.putRecords({
+        app: this.appId,
+        records: [{
+          id: Number(current.id),
+          revision: current.revision,
+          record: toKintoneRecord(fields),
+        }],
+      });
+      this.jsonl.append("job_lock_force_released", {
+        recordId: current.id,
+        jobKey: current.jobKey,
+        confirmedBy: params.confirmedBy,
+        evidenceRef: params.evidenceRef,
+      });
+      return "RELEASED";
+    } catch (updateError) {
+      try {
+        const after = await this.findByJobKey(params.observed.jobKey);
+        if (after === null) {
+          this.jsonl.append("job_lock_force_released", {
+            recordId: current.id,
+            jobKey: current.jobKey,
+            confirmation: "post-update-get",
+          });
+          return "RELEASED";
+        }
+        if (
+          findHttpStatus(updateError) === 409 &&
+          after.id === current.id &&
+          after.batchId === current.batchId
+        ) return "CONFLICT";
+        return "UNCONFIRMED";
+      } catch {
+        return "UNCONFIRMED";
+      }
+    }
+  }
+
+  private async findByRecordId(recordId: string): Promise<RunningRecord | null> {
+    const result = await this.client.getRecords({
+      app: this.appId,
+      query: `$id = ${Number(recordId)} limit 1`,
+      fields: ["$id", "$revision", "status", "started_at", "batch_id", "job_key", "host", "script_name"],
+    });
+    const record = result.records[0];
+    if (record === undefined) return null;
+    return {
+      id: String(record["$id"]?.value ?? ""),
+      revision: Number(record["$revision"]?.value ?? 0),
+      status: String(record["status"]?.value ?? ""),
+      startedAt: record["started_at"]?.value ? String(record["started_at"].value) : null,
+      batchId: String(record["batch_id"]?.value ?? ""),
+      jobKey: String(record["job_key"]?.value ?? ""),
+      host: String(record["host"]?.value ?? ""),
+      scriptName: String(record["script_name"]?.value ?? ""),
+    };
   }
 
   /**
@@ -431,10 +542,13 @@ export class LogAppClient {
     });
     return result.records.map((record) => ({
       id: String(record["$id"]?.value ?? ""),
+      revision: Number(record["$revision"]?.value ?? 0),
       status: "RUNNING",
       startedAt: record["started_at"]?.value ? String(record["started_at"].value) : null,
       batchId: String(record["batch_id"]?.value ?? ""),
       jobKey: String(record["job_key"]?.value ?? ""),
+      host: String(record["host"]?.value ?? ""),
+      scriptName: String(record["script_name"]?.value ?? ""),
     }));
   }
 }

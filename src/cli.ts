@@ -12,6 +12,7 @@ import { initLogAppCommand, checkLogAppCommand } from "./commands/initLogapp";
 import { capabilitiesCommand } from "./commands/capabilities";
 import { describeProfileCommand } from "./commands/describeProfile";
 import { inspectJobCommand } from "./commands/inspectJob";
+import { forceUnlockJobCommand, inspectLockCommand } from "./commands/lockRecovery";
 
 export interface ParsedArgs {
   command: string;
@@ -37,6 +38,10 @@ const VALUE_FLAGS = new Set([
   "--correlation-id",
   "--attempt-id",
   "--expected-job-id",
+  "--job-key",
+  "--reason",
+  "--confirmed-by",
+  "--evidence-ref",
 ]);
 
 const COMMON_FLAGS = ["--profile", "--config", "--help", "-h"] as const;
@@ -59,6 +64,10 @@ const COMMAND_FLAGS: Record<string, ReadonlySet<string>> = {
   capabilities: new Set(["--json", "--help", "-h"]),
   "describe-profile": new Set([...COMMON_FLAGS, "--json"]),
   "inspect-job": new Set([...COMMON_FLAGS, "-f", "--file", "--json"]),
+  "inspect-lock": new Set([...COMMON_FLAGS, "--job-key", "--json"]),
+  "force-unlock-job": new Set([
+    ...COMMON_FLAGS, "--job-key", "--reason", "--confirmed-by", "--evidence-ref", "--json",
+  ]),
 };
 
 const POSITIONAL_COUNTS: Record<string, number> = {
@@ -71,8 +80,12 @@ const POSITIONAL_COUNTS: Record<string, number> = {
   capabilities: 0,
   "describe-profile": 0,
   "inspect-job": 0,
+  "inspect-lock": 0,
+  "force-unlock-job": 0,
 };
-const MACHINE_JSON_COMMANDS = new Set(["capabilities", "describe-profile", "inspect-job"]);
+const MACHINE_JSON_COMMANDS = new Set([
+  "capabilities", "describe-profile", "inspect-job", "inspect-lock", "force-unlock-job",
+]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const [command, ...rest] = argv;
@@ -137,6 +150,27 @@ export function validateArgs(args: ParsedArgs): void {
     throw new Error("--json / --sample は --dry-run との併用時のみ指定できます");
   }
   validateOrchestratorArgs(args);
+  validateLockRecoveryArgs(args);
+}
+
+function validateLockRecoveryArgs(args: ParsedArgs): void {
+  if (args.command !== "inspect-lock" && args.command !== "force-unlock-job") return;
+  const required = ["--job-key", "--profile", "--config"];
+  if (args.command === "force-unlock-job") required.push("--reason", "--confirmed-by", "--evidence-ref");
+  const missing = required.filter((flag) => {
+    const value = stringFlag(args, flag);
+    return value === undefined || value.trim().length === 0;
+  });
+  if (!boolFlag(args, "--json")) missing.push("--json");
+  if (missing.length > 0) throw new Error(`${args.command} の必須入力がありません: ${missing.join(", ")}`);
+  if (args.command === "force-unlock-job") {
+    const evidenceRef = stringFlag(args, "--evidence-ref")!;
+    try {
+      new URL(evidenceRef);
+    } catch {
+      throw new Error("--evidence-ref は絶対 URI で指定してください");
+    }
+  }
 }
 
 const ORCHESTRATOR_FLAGS = [
@@ -212,6 +246,9 @@ const USAGE = `kSQL Flow — kintone バッチランナー (MIT, as-is)
   ksql-flow capabilities --json
   ksql-flow describe-profile --profile <p> --config <path> --json
   ksql-flow inspect-job -f <file.sql> --profile <p> --config <path> --json
+  ksql-flow inspect-lock --job-key <key> --profile <p> --config <path> --json
+  ksql-flow force-unlock-job --job-key <key> --reason <text> --confirmed-by <name>
+                --evidence-ref <uri> --profile <p> --config <path> --json
 
 共通フラグ:
   --profile <name>   使用するプロファイル（省略時は defaultProfile）
@@ -280,6 +317,21 @@ export async function main(argv: string[]): Promise<number> {
         const file = stringFlag(args, "-f") ?? stringFlag(args, "--file");
         if (!file) throw new ConfigError("inspect-job には -f <file.sql> が必要です");
         return await inspectJobCommand(loadProfile(args), file);
+      }
+      case "inspect-lock": {
+        requireJsonFlag(args);
+        requireExplicitProfileAndConfig(args);
+        return await inspectLockCommand(loadProfile(args), stringFlag(args, "--job-key")!);
+      }
+      case "force-unlock-job": {
+        requireJsonFlag(args);
+        requireExplicitProfileAndConfig(args);
+        return await forceUnlockJobCommand(loadProfile(args), {
+          jobKey: stringFlag(args, "--job-key")!,
+          reason: stringFlag(args, "--reason")!,
+          confirmedBy: stringFlag(args, "--confirmed-by")!,
+          evidenceRef: stringFlag(args, "--evidence-ref")!,
+        });
       }
       case "validate": {
         const profile = loadProfile(args);

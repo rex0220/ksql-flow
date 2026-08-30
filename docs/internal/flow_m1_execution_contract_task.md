@@ -145,12 +145,12 @@ JOB レコードへ runner_execution_started_at（+相関 ID）を UPDATE し、
 
 既存 `unlock` / `--force-unlock`（profile 内全 RUNNING を対象、`src/commands/unlock.ts` / `run.ts:77`）は**人間向けとして不変更**。orchestrator 向けに機械可読・対象特定・停止確認必須の新コマンドを追加する:
 
-1. `ksql-flow inspect-lock --job-key <key> --json` — 読取専用。該当 job_key の RUNNING レコード（record id・batch_id・started_at・host）を返す。応答消失後の再照会にも使う
-2. `ksql-flow force-unlock-job --job-key <key> --reason <text> --confirmed-by <name> --evidence-ref <uri> --json` — 必須入力が 1 つでも欠けたら **API 呼び出し前に拒否**（Exit 1。FlowNet の Spike F と同じ fail-closed 順序）。認証主体は接続に使う token（profile）であり、`--confirmed-by` は停止を確認した人・仕組みの表示名
+1. `ksql-flow inspect-lock --job-key <key> --profile <p> --config <path> --json` — 読取専用。該当 job_key の RUNNING レコード（record id・batch_id・started_at・host・script_name）を返す。応答消失後の再照会にも使う
+2. `ksql-flow force-unlock-job --job-key <key> --reason <text> --confirmed-by <name> --evidence-ref <uri> --profile <p> --config <path> --json` — 必須入力が 1 つでも欠けたら **API 呼び出し前に拒否**（Exit 1。FlowNet の Spike F と同じ fail-closed 順序）。認証主体は接続に使う token（profile）であり、`--confirmed-by` は停止を確認した人・仕組みの表示名
 3. 停止確認は**入力**（kSQL-Flow が旧プロセスの停止を自ら証明できないため、確認済みであることの表明 + 証拠参照を要求し、解除レコードの `log_detail` へ全入力を記録する）。D-26 のとおり FlowNet は lock レコードを直接変更しない
-4. 解除は既存 `recoverStale` 方式（終端 status + `job_key` クリア + `job_key_done` 退避の単一 UPDATE — D-26 追記の実測済み方式）を踏襲しつつ、status は `TIMEOUT` ではなく明示解除が判別できる値にするか `log_detail` で区別（Codex 提案 → レビューで確定）
+4. 解除は既存 `recoverStale` 方式（終端 status + `job_key` クリア + `job_key_done` 退避の単一 UPDATE — D-26 追記の実測済み方式）を踏襲する。M1-g 実装判断は **既存選択肢 `FAILED` + `log_detail` 先頭の `LOCK_RECOVERY` 監査 JSON**。自動 stale 回収の `TIMEOUT` と判別でき、status 選択肢追加・旧ログアプリ移行を避ける
 5. 結果 JSON（kind 例: `LOCK_RECOVERY_RESULT`、formatVersion 1）: 対象 job_key・record id・outcome（`RELEASED` / `NOT_FOUND` / `NOT_RUNNING` / `CONFLICT` / `UNCONFIRMED` 等の安定 code）・解除前後の状態。Exit（提案・返信文書へ記録): RELEASED=0 / 入力不備=1 / 照会不能・応答消失で未確定=3 / 対象が生きている競合=5
-6. 応答消失時: 解除 UPDATE の応答を確認できなければ未確定（Exit 3）とし、`inspect-lock` での再照会手順を結果 JSON と文書に明記
+6. 応答消失時: 解除 UPDATE の応答を確認できなければ job_key を再 GET し、クリア済みを確認できた場合だけ `RELEASED`。確認できなければ `UNCONFIRMED`（Exit 3）とし、`inspect-lock` での再照会手順を結果 JSON と文書に明記
 
 ## 10. テストと受入基準の対応
 

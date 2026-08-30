@@ -19,6 +19,11 @@ describe("CLI public contract", () => {
     ["capabilities", ["capabilities", "--json"]],
     ["describe-profile", ["describe-profile", "--profile", "prod", "--config", "config.json", "--json"]],
     ["inspect-job", ["inspect-job", "-f", "job.sql", "--profile", "prod", "--config", "config.json", "--json"]],
+    ["inspect-lock", ["inspect-lock", "--job-key", "prod:job", "--profile", "prod", "--config", "config.json", "--json"]],
+    ["force-unlock-job", [
+      "force-unlock-job", "--job-key", "prod:job", "--reason", "stopped", "--confirmed-by", "watchdog",
+      "--evidence-ref", "incident://INC-1", "--profile", "prod", "--config", "config.json", "--json",
+    ]],
   ])("%s: 許可フラグと positional を受理する", (_command, argv) => {
     expect(() => validateArgs(parseArgs(argv))).not.toThrow();
   });
@@ -33,6 +38,8 @@ describe("CLI public contract", () => {
     ["capabilities", ["capabilities", "--config", "config.json"]],
     ["describe-profile", ["describe-profile", "--strict"]],
     ["inspect-job", ["inspect-job", "--sample", "1"]],
+    ["inspect-lock", ["inspect-lock", "--force-unlock"]],
+    ["force-unlock-job", ["force-unlock-job", "--as-of", "2026-08-30"]],
   ])("%s: 未知または不適用フラグを拒否する", (_command, argv) => {
     expect(() => validateArgs(parseArgs(argv))).toThrow(/未知または不適用/);
   });
