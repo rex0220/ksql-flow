@@ -2,7 +2,7 @@
 
 `ksql-flow-log-template1.zip` は、設計書 8.2 の必須フィールド定義を持つ**実行ログアプリの kintone アプリテンプレート**です。レイアウトと一覧（ビュー）も設定済みで、これが最も簡単なログアプリの作成方法です。
 
-同梱 zip は template v0.4 です。v0.3.0 の任意フィールド `deleted_count`（表示名「削除件数」）に加え、v0.4 で `correlation_id` / `attempt_id` / `execution_id` / `job_id` / `runner_execution_started_at` と status 選択肢 `CANCELLED` を追加しました。相関フィールドは全て非必須・重複禁止なしです。2026-08-24 の更新で**レコードのタイトルを `スクリプト名` に設定済み**です（通知一覧・レコード一覧でジョブ名が見えるように。BATCH レコードのタイトルは実行対象ディレクトリ表記になります）。2026-08-27 の更新で、**リラン指示ポーラー用の `rerun_` フィールド 10 個**（`rerun_request` チェックボックス・`rerun_state` ドロップダウンほか）を収録しました。2026-08-28 の更新で、**アプリの説明**（レコードの見方・リラン手順・編集方針・障害対応ランブックへの導線）を収録しました — **説明文中のランブック URL は作者の環境のものなので、アプリ作成後に自分のジョブリポジトリの `docs/runbook.md`（[ksql-flow-template に雛形を同梱](https://github.com/rex0220/ksql-flow-template/blob/main/docs/runbook.md)）へ差し替えてください**。それ以前に作成した既存アプリで揃えたい場合は、アプリ設定で不足フィールドの手動追加と「その他の設定 → レコードのタイトル」の変更をしてください。**`rerun_` フィールドはランナーの動作に不要**（`--check-logapp` の検査対象外）で、無くてもランナーは従来どおり動作します — 必要になるのはポーラー（リモートからのリラン指示）を導入するときだけです。
+同梱 zip は template v0.4 です。v0.3.0 の任意フィールド `deleted_count`（表示名「削除件数」）に加え、v0.4 で `correlation_id` / `attempt_id` / `execution_id` / `job_id` / `runner_execution_started_at` と status 選択肢 `CANCELLED`、**orchestrator（kSQL-FlowNet）実行の確認用一覧「FlowNet相関確認」**（相関ID ありのレコードだけを新しい順に表示）を追加しました。相関フィールドは全て非必須・重複禁止なしで、フォームでは `バッチ実行ID` の行の直後に配置されています。2026-08-24 の更新で**レコードのタイトルを `スクリプト名` に設定済み**です（通知一覧・レコード一覧でジョブ名が見えるように。BATCH レコードのタイトルは実行対象ディレクトリ表記になります）。2026-08-27 の更新で、**リラン指示ポーラー用の `rerun_` フィールド 10 個**（`rerun_request` チェックボックス・`rerun_state` ドロップダウンほか）を収録しました。2026-08-28 の更新で、**アプリの説明**（レコードの見方・リラン手順・編集方針・障害対応ランブックへの導線）を収録しました — **説明文中のランブック URL は作者の環境のものなので、アプリ作成後に自分のジョブリポジトリの `docs/runbook.md`（[ksql-flow-template に雛形を同梱](https://github.com/rex0220/ksql-flow-template/blob/main/docs/runbook.md)）へ差し替えてください**。それ以前に作成した既存アプリで揃えたい場合は、アプリ設定で不足フィールドの手動追加と「その他の設定 → レコードのタイトル」の変更をしてください。**`rerun_` フィールドはランナーの動作に不要**（`--check-logapp` の検査対象外）で、無くてもランナーは従来どおり動作します — 必要になるのはポーラー（リモートからのリラン指示）を導入するときだけです。
 
 ## 使い方
 
@@ -36,7 +36,7 @@ ksql-flow validate --check-logapp --profile <profile>
   1. 失敗の条件通知（2 条件レシピ — 本 README 下部・連載 #4）
   2. **ハング検知のリマインダー通知**（`ステータス` = RUNNING・`更新日時` の 2 時間後 — **仕様 §5.5 の必須監視構成**。TIMEOUT への更新は次回実行の回収時点なので、これが無いとハングを検知できません）
   3. ポーラー導入時のみ: フィールドのアクセス権（`rerun_request` は依頼者グループのみ編集可・他の全フィールドは Everyone 閲覧のみ）とリラン滞留リマインダー（`更新日時` + 1 時間・`rerun_request` に REQUEST を含む かつ `rerun_state` 未選択）
-  4. **orchestrator（kSQL-FlowNet）導入時のみ**: 確認用一覧「FlowNet相関確認」と相関 5 フィールドの Everyone=閲覧のみ ACL。既存アプリへは同梱スクリプト（`scripts/logapp_v04_upgrade.console.js` → `scripts/logapp_v04_field_acl.console.js`）で適用する。FlowNet を新規導入する場合のログアプリは、**FlowNet 側配布のテンプレート（ログアプリ同梱・一覧/ACL 設定済み）を使う想定**のため、本テンプレートには収録しない（オーナー裁定 2026-08-30 — standalone 製品に orchestrator 固有設定を持ち込まない境界）
+  4. **orchestrator（kSQL-FlowNet）導入時のみ**: 相関 5 フィールドの Everyone=閲覧のみ ACL（`scripts/logapp_v04_field_acl.console.js` で適用 — **kintone のアプリテンプレートはフィールドアクセス権を持ち出せない実測事実**のため、テンプレート・スクリプトどちらの経路でも ACL はこのスクリプトで設定する）。既存アプリへのフィールド・一覧の追加は `scripts/logapp_v04_upgrade.console.js`
 
 ## 代替手段
 

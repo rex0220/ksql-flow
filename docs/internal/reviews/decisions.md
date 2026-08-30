@@ -184,3 +184,7 @@
 - **裁定**: ksql-flow 同梱の `template/ksql-flow-log-template1.zip` には v0.4 の相関フィールド・CANCELLED 選択肢までを収録し、**一覧「FlowNet相関確認」と相関 5 フィールドの Everyone=閲覧のみ ACL は収録しない**。これらは orchestrator（kSQL-FlowNet）導入時のみ意味を持つ設定であり、(a) 既存アプリへは同梱 Console スクリプト 2 本で適用、(b) **FlowNet 新規導入時のログアプリは FlowNet 側配布テンプレート（ログアプリ同梱・一覧/ACL 設定済み）で作成する**役割分担とする。
 - 理由: kintone テンプレートは新規アプリ作成専用で既存アプリへ適用できない（スクリプト経路はどのみち必須）。standalone 製品のテンプレートに orchestrator 固有の運用設定を持ち込まない境界が明確になる。FlowNet 側テンプレートの元は、検証アプリ（v0.4 + 一覧 + ACL 適用済み）のエクスポートを使用できる。
 - 反映: `template/README.md`「テンプレートに含まれない設定」4 項、完了報告 §2 JOB 相関移行行。FlowNet へは完了報告でログアプリ同梱テンプレートの整備を提案。
+
+### Q14 追補（2026-08-30・一部 Superseded）
+
+オーナー指示により、**一覧「FlowNet相関確認」は ksql-flow 同梱テンプレートへ収録する**方針へ変更（検証アプリのエクスポートで template zip を更新。相関フィールドのレイアウトも batch_id 直後へ確定）。rerun フィールド収録の前例と整合し、standalone ユーザーへの害はない（一覧が空で存在するだけ）。**フィールド ACL は kintone テンプレート機構が持ち出せないことを実測で確認**（エクスポート ZIP の `acl.field` が空）— ACL は全経路で `scripts/logapp_v04_field_acl.console.js` による適用が正となる。FlowNet 側テンプレートへのログアプリ同梱提案は維持（同じエクスポート元を使用可能）。
