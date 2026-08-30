@@ -63,3 +63,14 @@
 
 Ctrl+Break 実コンソール・rollback 実削除・ロック競合実機再現（FlowNet D-11 実測と単体試験で担保済み）。**必須の実機検証はすべて完了**。
 | - | rollback 実削除の試行（任意）・ロック競合の実機再現（FlowNet D-11 実測と単体試験で担保済みのため任意） | 必要なら追加実施 |
+
+## 追記(2026-08-30): FlowNet M5 実機 E2E による相互確認の完了
+
+FlowNet の M5(直列実行)実機 E2E が全シナリオ合格(ksql-flownet main `ee4acb4` に証跡 8 件)。kSQL-Flow 側に関わる確認:
+
+- 実 kSQL-Flow v0.7.0 subprocess 経由で公式通し 6/6(直列成功/中央 ASSERT 失敗→BLOCKED/resume/分散ロック競合/kill→UNKNOWN/清掃)
+- **受入基準 10 の相互確認完了**: 別 cwd 起動による分散ロック裁定で、単体 run 側 LOCK_CONFLICT/Exit 5・network 側 PREPARE_FAILED→WAITING・独立ノード継続・単体側完走を実機確認(当方注意点 3 の反映)
+- 再ビルド exe 単体経路(KSQL_FLOW_BIN=ksql-flow.exe)でも serial-success 合格 — dist-bin v0.7.0 再ビルドの検証完了
+- kill 試験後の RUNNING 残留なし(全シナリオ自己清掃・force-unlock-job の出番なし)
+- 4249 試験レコード(保持中)の識別: ジョブ名 `m5_shared_read` / `m5_midfail_*` / `m5_diamond_*` / `m5_success_*`、correlation_id `netrun_*`、attempt_id `attempt_*`
+- 副次効果: 当方発見の DATETIME 分精度を FlowNet ハーネスも踏み(同一分内の started_at 順序依存)、FlowNet 側で修正
