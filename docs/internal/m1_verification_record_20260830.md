@@ -36,6 +36,12 @@
   - `capabilities` / `describe-profile`（canonical・秘密不在を実出力確認）/ `inspect-job`: 期待どおり
 - **検出した要修正点（M1-h 追補へ差し戻し）**: kintone DATETIME は**分精度**（秒を保持しない）。`runner_execution_started_at` の実機保存値は `HH:mm:00Z` になるため、M1-d の応答消失時「再 GET で自書込値と完全一致なら続行」は実機では**秒付き値と一致せず常に fail-closed** になる（安全側だが、契約 §13 に記録した回復手順が機能しない）。モックが秒精度で保存していたため机上試験では検出できなかった。対応: 照合を分精度で行う・モックの DATETIME 保存を実機同様に分精度へ・完了報告の「三点一致」を「分精度で一致」へ訂正 — **M1-h 追補で修正済み**（レビュー通過）。あわせてオーナー指摘により、相関 5 フィールドの人為改変防止として `scripts/logapp_v04_field_acl.console.js`（Everyone=閲覧のみ・ランナーの API トークン書込は対象外）を追加
 
+## 項目 4 追記: 相関フィールドのアクセス権 — **適用・追認済み（2026-08-30）**
+
+- オーナーが `scripts/logapp_v04_field_acl.console.js` を実機実行し、相関 5 フィールドすべて Everyone=閲覧のみ を確認（スクリプト自動検証 OK）
+- 適用後に Claude Code が orchestrator run を再実行し、**API トークン経由の書込が妨げられない**こと（correlation_id / runner_execution_started_at / status の記録、Exit 0）を実 GET で追認
+- 根拠: 監査・耐久証跡の人為改変防止（Q12 と同方式。API トークンは Administrator 相当でフィールドアクセス権の対象外）
+
 ## 未実施（残項目）
 
 | # | 項目 | 実施方法（予定） |
