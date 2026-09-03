@@ -1,6 +1,6 @@
 # kSQL Flow 仕様書
 
-**対応バージョン: ksql-flow v0.1.0 ／ エンジン @rex0220/kintone-sql-tools ^3.71.0 ／ SQL 方言 dialect 1**
+**対応バージョン: ksql-flow v0.8.0 ／ エンジン @rex0220/kintone-sql-tools ^3.76.0 ／ SQL 方言 dialect 1**
 
 本書は kSQL Flow の公開仕様書です。本書単体で仕様として完結します。
 （参考・非規範: 設計判断の経緯や改訂履歴は https://github.com/rex0220/ksql-flow の `docs/internal/` に公開されています）
@@ -64,7 +64,7 @@ flowchart TD
     JSONL -.->|"次回実行時に再送"| LOG
 ```
 
-> **前提条件**: 図中の「kSQL MCP を通じてクエリ検証」は、MCP が Flow 拡張構文（dialect 1）を検証できることが前提です（→ 3.7。ランナーが要求するエンジンは **^3.71.0** — README の互換表を参照）。なお MCP の `ksql_validate` はネットワーク 0 の契約のため updateKey 等のスキーマ依存検証は含まず、フル検証はランナーの `validate`（公式 API `/flow` の `validateScript(source, { client })`）で行います。
+> **前提条件**: 図中の「kSQL MCP を通じてクエリ検証」は、MCP が Flow 拡張構文（dialect 1）を検証できることが前提です（→ 3.7。ランナーが要求するエンジンは **^3.76.0** — README の互換表を参照）。なお MCP の `ksql_validate` はネットワーク 0 の契約のため updateKey 等のスキーマ依存検証は含まず、フル検証はランナーの `validate`（公式 API `/flow` の `validateScript(source, { client })`）で行います。
 
 **通信先の限定（セキュリティモデルの要点、詳細は 12 章）**: kSQL Flow が通信するのは (1) 設定された kintone 環境、(2) 利用者が設定した通知 Webhook のみ。rex0220 側サーバーへのテレメトリ送信・ライセンス照会等の外部通信は一切行わない。
 
@@ -208,7 +208,7 @@ DELETE MISSING WITHIN (WHERE 当月売上実績 > 0);
 * **Flow 構文は正規エイリアスとして追加**: `CREATE TEMP TABLE x AS SELECT ...`（裸名） ≡ `CREATE TEMP TABLE #x AS SELECT ...`、`UPSERT ... KEY (...)` ≡ `UPSERT ... ON DUPLICATE (...)` とし、`MERGE`（3.4）もこの UPSERT へ正規化します。どちらの表記も同一の内部表現に解決され、意味差はありません。
 * **Flow 専用文**（`ASSERT <条件>, 'msg'` 形式・`ASSERT WARN`・`EXIT SUCCESS IF`・`-- @ksql` ヘッダ・時刻関数の as-of 固定評価）は dialect 1 の追加仕様として既存エンジンに実装され、MCP の `ksql_validate` も同一実装を共有します。
 * **dialect 0 との互換**: `ASSERT <式> <比較> <式>` は dialect 0 の既存機能として従来どおり動作します。dialect 0 のスクリプトでエラーになるのは **Flow 形式（`, 'msg'` 付き / `WARN`）を使った場合のみ**です。
-* **提供状況**: Flow 拡張構文（dialect 1）の解析・検証・実行は kintone-sql-tools が提供します。公式 API `@rex0220/kintone-sql-tools/flow`（parseScript / validateScript / explainScript / executeStatement / previewStatement / onChunkWritten ほか、文単位実行対応）が semver 対象として提供されており、Flow CLI（本リポジトリ）はこれに依存して実装されています（要求バージョンは ^3.71.0 — README 互換表）。詳細は kintone-sql-tools 言語リファレンス §27 を参照。
+* **提供状況**: Flow 拡張構文（dialect 1）の解析・検証・実行は kintone-sql-tools が提供します。公式 API `@rex0220/kintone-sql-tools/flow`（parseScript / validateScript / explainScript / executeStatement / previewStatement / onChunkWritten ほか、文単位実行対応）が semver 対象として提供されており、Flow CLI（本リポジトリ）はこれに依存して実装されています（要求バージョンは ^3.76.0 — README 互換表）。詳細は kintone-sql-tools 言語リファレンス §27 を参照。
 
 ### 3.8 リポジトリ構成（全面 MIT）
 

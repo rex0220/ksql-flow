@@ -116,10 +116,9 @@ export function collectRequiredImportSources(statements: readonly Statement[]): 
     if (previous !== undefined && previous.kind !== current.kind) {
       throw new ConfigError(`IMPORT source "${current.name}" はCSVとJSONの両方として参照されています`);
     }
-    if (previous?.encoding !== undefined && current.encoding !== undefined && previous.encoding !== current.encoding) {
-      throw new ConfigError(`IMPORT source "${current.name}" のENCODING指定が一致しません`);
-    }
-    required.set(current.name, previous?.encoding !== undefined ? previous : current);
+    // 同名sourceを異なるENCODING句の複数文が読むのは正当(それぞれの解釈が
+    // B178 receiptで別entryになる — 契約合意)。ENCODINGの衝突検査はしない。
+    required.set(current.name, previous ?? current);
   }
   return [...required.values()].sort((a, b) => compareNames(a.name, b.name));
 }
@@ -270,12 +269,13 @@ export class ImportSourceRegistry {
       if (source.expectedSha256 !== undefined && !hashesEqual(sha256, source.expectedSha256)) {
         throw new InputFileMutatedError(source.name);
       }
-      const required = this.requiredByName.get(source.name);
+      // encoding/rowsはB178 receipt(materialize成功)時のみ確定する。AST由来の
+      // ENCODINGをここで刻印すると、decode失敗sourceにまでencodingが載って
+      // 仕様§3.9「未達はsha256/bytesのみ」に反する(2026-09-04レビュー要修正2)。
       const receipt: InputFileReceipt = {
         name: source.name,
         sha256,
         bytes: bytes.byteLength,
-        ...(required?.encoding !== undefined ? { encoding: required.encoding } : {}),
       };
       return { payload: { bytes }, receipt };
     } catch (error) {

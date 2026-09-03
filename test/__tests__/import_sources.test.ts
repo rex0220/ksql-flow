@@ -57,7 +57,7 @@ test("uses one cached byte object for hashing and the engine payload", async () 
   expect(second.bytes).toBe(first.bytes);
   expect(Buffer.from(first.bytes)).toEqual(content);
   expect(registry.snapshotInputFiles()).toEqual([
-    { name: "sales", sha256: hash, bytes: content.length, encoding: "UTF8" },
+    { name: "sales", sha256: hash, bytes: content.length },
   ]);
 });
 
@@ -82,7 +82,7 @@ test("preloads used sources in orchestrator mode and excludes unused supplies", 
   await registry.preloadUsed();
   expect(warnings.join("\n")).toContain("unused");
   expect(registry.snapshotInputFiles()).toEqual([
-    { name: "used", sha256: usedHash, bytes: fs.statSync(used).size, encoding: "UTF8" },
+    { name: "used", sha256: usedHash, bytes: fs.statSync(used).size },
   ]);
 });
 

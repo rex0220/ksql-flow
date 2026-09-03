@@ -128,7 +128,7 @@ test("--result-json - は stdout に JSON object 1 個 + LF だけを書き、ID
   expect(stderr.mock.calls.flat().join("\n")).toContain("=> NO_DATA");
 });
 
-test("orchestrator preloads and hashes IMPORT bytes before SQL and emits input_files without rows", async () => {
+test("orchestrator preloads and hashes IMPORT bytes before SQL and emits input_files with B178 rows receipt", async () => {
   world = buildWorld();
   const file = writeJob(world, "01_import.sql", `-- @ksql name: monthly_sales_sync
 -- @ksql dialect: 1
@@ -193,36 +193,50 @@ IMPORT INTO LAPP_顧客マスタ (顧客コード) FROM CSV sales ON DUPLICATE (
   ]);
 });
 
-test("B178 rows: ENCODING SJIS句の実効encodingがreceiptへ載り、異なるENCODINGの2文は別entryになる", async () => {
+test("B178 rows: 同名sourceを異なるENCODINGの2文が読むと解釈ごとの別entryになる(ASCII+NO HEADERで決定的)", async () => {
+  world = buildWorld();
+  const file = writeJob(world, "01_import.sql", `-- @ksql name: monthly_sales_sync
+-- @ksql dialect: 1
+IMPORT INTO LAPP_顧客マスタ (顧客コード, 当月売上実績) FROM CSV sales ENCODING SJIS NO HEADER COLUMNS (顧客コード, 当月売上実績) ON DUPLICATE (顧客コード);
+IMPORT INTO LAPP_顧客マスタ (顧客コード, 当月売上実績) FROM CSV sales ENCODING UTF8 NO HEADER COLUMNS (顧客コード, 当月売上実績) ON DUPLICATE (顧客コード);
+`);
+  const input = path.join(world.dir, "sales.csv");
+  // ASCIIのみのbytesはSJIS/UTF-8どちらでも同一内容にdecodeされ、両文とも成功する
+  const bytes = Buffer.from("C1,100\n", "ascii");
+  fs.writeFileSync(input, bytes);
+  const hash = crypto.createHash("sha256").update(bytes).digest("hex");
+  const target = path.join(world.dir, "encodings.json");
+  expect(await runCommand(world.profile, file, options(target, {
+    importSources: [{ name: "sales", kind: "CSV", absolutePath: input }],
+    expectedImportSha256: new Map([["sales", hash]]),
+  }))).toBe(EXIT.OK);
+  const result = readResult(target);
+  expect(result.input_files).toEqual([
+    { name: "sales", sha256: hash, bytes: bytes.length, rows: 1, encoding: "SJIS" },
+    { name: "sales", sha256: hash, bytes: bytes.length, rows: 1, encoding: "UTF8" },
+  ]);
+});
+
+test("B178 rows: SJIS decode失敗はreceipt無し — input_filesはsha256/bytesのみでencodingも載らない", async () => {
   world = buildWorld();
   const file = writeJob(world, "01_import.sql", `-- @ksql name: monthly_sales_sync
 -- @ksql dialect: 1
 IMPORT INTO LAPP_顧客マスタ (顧客コード) FROM CSV sales ENCODING SJIS ON DUPLICATE (顧客コード);
-IMPORT INTO LAPP_顧客マスタ (顧客コード) FROM CSV sales ON DUPLICATE (顧客コード);
 `);
   const input = path.join(world.dir, "sales.csv");
-  // ASCIIのみの内容はSJIS/UTF-8で同一bytes — 同一ファイルの異なる解釈を監査上区別する
-  const bytes = Buffer.from("顧客コード,当月売上実績\nC1,100\n", "utf8");
+  // 日本語ヘッダのUTF-8 bytesはSJISとしてdecode不能(invalid SJIS byte sequence)
+  const bytes = Buffer.from("顧客コード\nC1\n", "utf8");
   fs.writeFileSync(input, bytes);
   const hash = crypto.createHash("sha256").update(bytes).digest("hex");
-  const target = path.join(world.dir, "encodings.json");
-  const code = await runCommand(world.profile, file, options(target, {
+  const target = path.join(world.dir, "sjis-fail.json");
+  expect(await runCommand(world.profile, file, options(target, {
     importSources: [{ name: "sales", kind: "CSV", absolutePath: input }],
     expectedImportSha256: new Map([["sales", hash]]),
-  }));
+  }))).not.toBe(EXIT.OK);
   const result = readResult(target);
-  if (code === EXIT.OK) {
-    expect(result.input_files).toEqual([
-      expect.objectContaining({ name: "sales", sha256: hash, encoding: "SJIS" }),
-      expect.objectContaining({ name: "sales", sha256: hash, encoding: "UTF8" }),
-    ]);
-  } else {
-    // SJIS句で日本語ヘッダのUTF-8 bytesがdecode不能な実装の場合は、
-    // 1文目のmaterialize未達(通知なし)としてSJIS entryが載らないことを固定する
-    expect(result.input_files).toEqual([
-      expect.objectContaining({ name: "sales", sha256: hash }),
-    ]);
-  }
+  expect(result.input_files).toEqual([{ name: "sales", sha256: hash, bytes: bytes.length }]);
+  expect(result.input_files[0]).not.toHaveProperty("rows");
+  expect(result.input_files[0]).not.toHaveProperty("encoding");
 });
 
 test("B178 rows: 多列CSVの空行はdecode throwで通知なし — input_filesはrows無しのまま", async () => {

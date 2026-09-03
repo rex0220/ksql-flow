@@ -116,6 +116,8 @@ ksql-flow run -f <file.sql> [--as-of ISO8601]      # 単一ジョブ実行
               [--dry-run [--sample 1..50] [--json]]
               [--result-json <path|-> --correlation-id <id>
                --attempt-id <id> --expected-job-id <id>]
+              [--import-csv name=path]... [--import-json name=path]...
+              [--expected-import-sha256 name=64hex]...  # orchestrator では import ごとに必須
 ksql-flow run-all <jobsDir>                        # ディレクトリ一括実行（ファイル名順 + depends_on）
                 [--dry-run [--sample 1..50] [--json]]
                 [--resume | --from f | --only f]

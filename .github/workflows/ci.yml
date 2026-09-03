@@ -25,7 +25,7 @@ jobs:
       - name: Install registry dependencies
         run: npm ci
       - name: Verify engine dependency
-        run: npm ls @rex0220/kintone-sql-tools@^3.71.0
+        run: npm ls @rex0220/kintone-sql-tools@^3.76.0
       - run: npm test
       - run: npm run build
 

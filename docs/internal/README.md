@@ -8,7 +8,7 @@ as-is 公開方針（設計書 15.1）に基づき、本ディレクトリも公
 
 ## 開発メモ
 
-エンジンを隣接作業ツリーで結合確認する場合のみ `npm run dev:engine-local` で `file:../kintone-sql-tools` を node_modules へ一時適用する（package.json / package-lock.json はレジストリ参照 `^3.71.0` のまま）。通常の開発・CI はレジストリ版を使う。
+エンジンを隣接作業ツリーで結合確認する場合のみ `npm run dev:engine-local` で `file:../kintone-sql-tools` を node_modules へ一時適用する（package.json / package-lock.json はレジストリ参照 `^3.76.0` のまま）。通常の開発・CI はレジストリ版を使う。
 
 ## 構成
 
