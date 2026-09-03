@@ -65,6 +65,7 @@ function context(
     lastSuccessfulChunkNo: executionStarted ? 3 : null,
     ksqlFlowVersion: "0.6.0",
     engineVersion: "3.74.0",
+    inputFiles: [],
     failureKind,
     error,
     masker: { mask: (value) => value },
@@ -108,6 +109,34 @@ describe("Execution Result v1 canonical schema", () => {
 });
 
 describe("JobOutcome to Execution Result normalization", () => {
+  test("emits additive input_files with optional rows and encoding", () => {
+    const input = context(true);
+    input.inputFiles = [{
+      name: "sales",
+      sha256: "a".repeat(64),
+      bytes: 123,
+      encoding: "SJIS",
+    }];
+    const result = normalizeJobOutcome(outcome("SUCCESS", EXIT.OK), input);
+    expect(result.input_files).toEqual(input.inputFiles);
+    expect(result.input_files[0]).not.toHaveProperty("rows");
+    expectSchemaValid(result);
+    expect(validate({ ...result, input_files: [{ ...result.input_files[0], path: "C:\\secret.csv" }] })).toBe(false);
+  });
+
+  test("maps pre-execution sha mismatch to INPUT_FILE_MUTATED", () => {
+    const input = context(false);
+    input.validationFailureKind = "INPUT_FILE_MUTATED";
+    const result = normalizeJobOutcome(outcome("FAILED", EXIT.VALIDATION), input);
+    expect(result).toMatchObject({
+      resultCode: "INPUT_FILE_MUTATED",
+      executionStarted: false,
+      exitCode: 1,
+      error: { category: "CONFIG", code: "INPUT_FILE_MUTATED" },
+    });
+    expectSchemaValid(result);
+  });
+
   const rows: Array<{
     label: string;
     outcome: JobOutcome;

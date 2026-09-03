@@ -47,6 +47,131 @@ test("旧 status 選択肢で CANCELLED 書込が 400 になっても pending �
 });
 
 describe("run（受入基準 1: サンプルジョブ実行とログアプリ記録）", () => {
+  test.each([
+    {
+      label: "UTF-8 CSV",
+      extension: "csv",
+      sql: "IMPORT INTO LAPP_顧客マスタ (顧客コード, 当月売上実績) FROM CSV source ON DUPLICATE (顧客コード);",
+      bytes: Buffer.from("顧客コード,当月売上実績\nC-UTF8,100\n", "utf8"),
+      kind: "CSV" as const,
+      key: "C-UTF8",
+    },
+    {
+      label: "SJIS CSV",
+      extension: "csv",
+      sql: "IMPORT INTO LAPP_顧客マスタ (顧客コード, 当月売上実績) FROM CSV source ENCODING SJIS NO HEADER COLUMNS(顧客コード, 当月売上実績) ON DUPLICATE (顧客コード);",
+      bytes: Buffer.concat([Buffer.from("8e529363", "hex"), Buffer.from(",200\n", "ascii")]),
+      kind: "CSV" as const,
+      key: "山田",
+    },
+    {
+      label: "JSON",
+      extension: "json",
+      sql: "IMPORT INTO LAPP_顧客マスタ (顧客コード, 当月売上実績) FROM JSON source ON DUPLICATE (顧客コード);",
+      bytes: Buffer.from('[{"顧客コード":"C-JSON","当月売上実績":"300"}]', "utf8"),
+      kind: "JSON" as const,
+      key: "C-JSON",
+    },
+  ])("IMPORT $label executes through the public named-source resolver", async ({ extension, sql, bytes, kind, key }) => {
+    world = buildWorld();
+    const file = writeJob(world, "01_import.sql", `-- @ksql dialect: 1\n${sql}\n`);
+    const input = path.join(world.dir, `input.${extension}`);
+    fs.writeFileSync(input, bytes);
+    const code = await runCommand(world.profile, file, {
+      asOf: AS_OF,
+      baseFetch: world.mock.fetch,
+      out: world.out,
+      importSources: [{ name: "source", kind, absolutePath: input }],
+    });
+    expect(code).toBe(EXIT.OK);
+    expect(customerRecords(world).some((record) => record.顧客コード === key)).toBe(true);
+  });
+
+  test("IMPORT missing source and duplicate programmatic sources fail before mutation", async () => {
+    world = buildWorld();
+    const file = writeJob(world, "01_import.sql", "IMPORT INTO LAPP_顧客マスタ (顧客コード) FROM CSV source;");
+    expect(await runCommand(world.profile, file, {
+      baseFetch: world.mock.fetch, out: world.out,
+    })).toBe(EXIT.VALIDATION);
+    const input = path.join(world.dir, "input.csv");
+    fs.writeFileSync(input, "顧客コード\nC1\n");
+    expect(await runCommand(world.profile, file, {
+      baseFetch: world.mock.fetch,
+      out: world.out,
+      importSources: [
+        { name: "source", kind: "CSV", absolutePath: input },
+        { name: "source", kind: "CSV", absolutePath: input },
+      ],
+    })).toBe(EXIT.VALIDATION);
+    const mutations = world.mock.requests.filter((request) =>
+      request.appId === CUSTOMER_APP && ["POST", "PUT", "DELETE"].includes(request.method)
+    );
+    expect(mutations).toHaveLength(0);
+  });
+
+  test("IMPORT enforces maxRecords and the 10 MiB engine payload limit before mutation", async () => {
+    world = buildWorld();
+    // buildWorldの既定値を保ったまま読取上限だけを固定する。
+    world.profile.limits.maxReadRows = 1;
+    const file = writeJob(world, "01_import_limit.sql", "IMPORT INTO LAPP_顧客マスタ (顧客コード) FROM CSV source;");
+    const input = path.join(world.dir, "limit.csv");
+    fs.writeFileSync(input, "顧客コード\nC1\nC2\n");
+    expect(await runCommand(world.profile, file, {
+      baseFetch: world.mock.fetch, out: world.out,
+      importSources: [{ name: "source", kind: "CSV", absolutePath: input }],
+    })).toBe(EXIT.VALIDATION);
+    expect(customerRecords(world)).toHaveLength(0);
+
+    world.profile.limits.maxReadRows = null;
+    const huge = path.join(world.dir, "huge.json");
+    fs.writeFileSync(huge, Buffer.alloc(10 * 1024 * 1024 + 1, 0x20));
+    const jsonJob = writeJob(world, "02_import_huge.sql", "IMPORT INTO LAPP_顧客マスタ (顧客コード) FROM JSON source;");
+    expect(await runCommand(world.profile, jsonJob, {
+      baseFetch: world.mock.fetch, out: world.out,
+      importSources: [{ name: "source", kind: "JSON", absolutePath: huge }],
+    })).toBe(EXIT.VALIDATION);
+    expect(customerRecords(world)).toHaveLength(0);
+  });
+
+  test("IMPORT upsert converges after a second-chunk failure and retry", async () => {
+    world = buildWorld();
+    const file = writeJob(world, "01_import_retry.sql", `IMPORT INTO LAPP_顧客マスタ
+      (顧客コード, 当月売上実績) FROM CSV source ON DUPLICATE (顧客コード);`);
+    const input = path.join(world.dir, "retry.csv");
+    fs.writeFileSync(input, [
+      "顧客コード,当月売上実績",
+      ...Array.from({ length: 101 }, (_, index) => `C${String(index).padStart(3, "0")},${index}`),
+      "",
+    ].join("\n"));
+    let mutations = 0;
+    const failSecondChunk = (async (request: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof request === "string" ? request : request instanceof URL ? request.toString() : request.url);
+      const method = (init?.method ?? "GET").toUpperCase();
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) as { app?: number } : {};
+      if (url.pathname.endsWith("/records.json") && body.app === CUSTOMER_APP && ["POST", "PUT"].includes(method)) {
+        mutations += 1;
+        if (mutations === 2 || mutations === 3) {
+          return new Response(JSON.stringify({ code: "MOCK", message: "chunk failed" }), {
+            status: 500, headers: { "Content-Type": "application/json" },
+          });
+        }
+      }
+      return world!.mock.fetch(request, init);
+    }) as typeof fetch;
+    expect(await runCommand(world.profile, file, {
+      baseFetch: failSecondChunk, out: world.out,
+      importSources: [{ name: "source", kind: "CSV", absolutePath: input }],
+    })).toBe(EXIT.RUNTIME);
+    expect(customerRecords(world)).toHaveLength(100);
+    expect(await runCommand(world.profile, file, {
+      baseFetch: world.mock.fetch, out: world.out,
+      importSources: [{ name: "source", kind: "CSV", absolutePath: input }],
+    })).toBe(EXIT.OK);
+    const records = customerRecords(world);
+    expect(records).toHaveLength(101);
+    expect(new Set(records.map((record) => record.顧客コード)).size).toBe(101);
+  });
+
   test("正常実行: UPSERT が反映され JOB レコードが SUCCESS で残る", async () => {
     world = buildWorld({
       withDeletedCount: true,

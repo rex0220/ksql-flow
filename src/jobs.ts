@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { parseScript, type ParseScriptResult } from "@rex0220/kintone-sql-tools/flow";
+import { parseScript, type ParseScriptOptions, type ParseScriptResult } from "@rex0220/kintone-sql-tools/flow";
 import { ConfigError } from "./errors";
 
 /** エンジンの 1 スクリプト文数上限（申し送り 4: MAX_BATCH_STATEMENTS） */
@@ -20,14 +20,18 @@ export interface JobFile {
 }
 
 /** 単一の SQL ファイルを読み込み、ヘッダメタを解決する */
-export function loadJobFile(filePath: string, apps: Record<string, number>): JobFile {
+export function loadJobFile(
+  filePath: string,
+  apps: Record<string, number>,
+  options: Omit<ParseScriptOptions, "apps"> = {}
+): JobFile {
   let source: string;
   try {
     source = fs.readFileSync(filePath, "utf8");
   } catch (error) {
     throw new ConfigError(`ジョブファイルを読み込めません: ${filePath} (${(error as Error).message})`);
   }
-  const parsed = parseScript(source, { apps });
+  const parsed = parseScript(source, { apps, ...options });
   const fileName = path.basename(filePath);
   const name = parsed.meta.name ?? fileName.replace(/\.sql$/i, "");
   return {

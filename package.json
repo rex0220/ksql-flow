@@ -48,7 +48,7 @@
     "dev:engine-local": "npm install --no-save --package-lock=false @rex0220/kintone-sql-tools@file:../kintone-sql-tools"
   },
   "dependencies": {
-    "@rex0220/kintone-sql-tools": "^3.74.0"
+    "@rex0220/kintone-sql-tools": "^3.75.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",

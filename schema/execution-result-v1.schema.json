@@ -60,6 +60,10 @@
     "lastWrittenKey": { "type": ["string", "null"] },
     "ksqlFlowVersion": { "type": "string", "minLength": 1 },
     "engineVersion": { "type": "string", "minLength": 1 },
+    "input_files": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/inputFile" }
+    },
     "error": {
       "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/error" }]
     }
@@ -136,10 +140,26 @@
     {
       "if": { "properties": { "resultCode": { "const": "CANCELLED" } }, "required": ["resultCode"] },
       "then": { "$ref": "#/$defs/cancelledFailure" }
+    },
+    {
+      "if": { "properties": { "resultCode": { "const": "INPUT_FILE_MUTATED" } }, "required": ["resultCode"] },
+      "then": { "$ref": "#/$defs/inputFileMutatedFailure" }
     }
   ],
   "$defs": {
     "nonNegativeInteger": { "type": "integer", "minimum": 0 },
+    "inputFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "bytes"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "bytes": { "$ref": "#/$defs/nonNegativeInteger" },
+        "rows": { "$ref": "#/$defs/nonNegativeInteger" },
+        "encoding": { "type": "string", "enum": ["UTF8", "SJIS"] }
+      }
+    },
     "error": {
       "type": "object",
       "additionalProperties": true,
@@ -224,6 +244,12 @@
         "exitCode": { "const": 3 },
         "error": { "allOf": [{ "$ref": "#/$defs/error" }, { "properties": { "category": { "const": "CANCELLED" } } }] }
       }
+    },
+    "inputFileMutatedFailure": {
+      "allOf": [
+        { "$ref": "#/$defs/failedWithError" },
+        { "properties": { "exitCode": { "const": 1 }, "executionStarted": { "const": false }, "error": { "properties": { "category": { "const": "CONFIG" } } } } }
+      ]
     }
   }
 }

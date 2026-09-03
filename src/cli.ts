@@ -13,11 +13,13 @@ import { capabilitiesCommand } from "./commands/capabilities";
 import { describeProfileCommand } from "./commands/describeProfile";
 import { inspectJobCommand } from "./commands/inspectJob";
 import { forceUnlockJobCommand, inspectLockCommand } from "./commands/lockRecovery";
+import { parseImportInputs } from "./importSources";
 
 export interface ParsedArgs {
   command: string;
   positional: string[];
   flags: Map<string, string | boolean>;
+  repeatedFlags: Map<string, string[]>;
 }
 
 /** 値を取るフラグ（それ以外は boolean フラグ扱い） */
@@ -42,6 +44,12 @@ const VALUE_FLAGS = new Set([
   "--reason",
   "--confirmed-by",
   "--evidence-ref",
+  "--import-csv",
+  "--import-json",
+  "--expected-import-sha256",
+]);
+const REPEATABLE_VALUE_FLAGS = new Set([
+  "--import-csv", "--import-json", "--expected-import-sha256",
 ]);
 
 const COMMON_FLAGS = ["--profile", "--config", "--help", "-h"] as const;
@@ -53,6 +61,7 @@ const COMMAND_FLAGS: Record<string, ReadonlySet<string>> = {
     "-f", "--file", "--profile", "--config", "--as-of", "--dry-run", "--sample", "--json",
     "--strict", "--max-api-calls", "--lock", "--force-unlock",
     "--result-json", "--correlation-id", "--attempt-id", "--expected-job-id",
+    "--import-csv", "--import-json", "--expected-import-sha256",
   ]),
   "run-all": new Set([
     ...COMMON_FLAGS,
@@ -91,12 +100,16 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const [command, ...rest] = argv;
   const positional: string[] = [];
   const flags = new Map<string, string | boolean>();
+  const repeatedFlags = new Map<string, string[]>();
   for (let index = 0; index < rest.length; index++) {
     const arg = rest[index];
     if (arg.startsWith("-")) {
       const eq = arg.indexOf("=");
       if (eq !== -1) {
-        flags.set(arg.slice(0, eq), arg.slice(eq + 1));
+        const flag = arg.slice(0, eq);
+        const value = arg.slice(eq + 1);
+        if (REPEATABLE_VALUE_FLAGS.has(flag)) appendRepeated(repeatedFlags, flag, value);
+        else flags.set(flag, value);
         continue;
       }
       if (VALUE_FLAGS.has(arg)) {
@@ -104,7 +117,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
         if (value === undefined || (value.startsWith("-") && !(arg === "--result-json" && value === "-"))) {
           throw new Error(`${arg} には値が必要です`);
         }
-        flags.set(arg, value);
+        if (REPEATABLE_VALUE_FLAGS.has(arg)) appendRepeated(repeatedFlags, arg, value);
+        else flags.set(arg, value);
         index += 1;
       } else {
         flags.set(arg, true);
@@ -113,7 +127,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
       positional.push(arg);
     }
   }
-  return { command: command ?? "", positional, flags };
+  return { command: command ?? "", positional, flags, repeatedFlags };
+}
+
+function appendRepeated(target: Map<string, string[]>, flag: string, value: string): void {
+  target.set(flag, [...(target.get(flag) ?? []), value]);
 }
 
 /** API 呼び出しや設定ファイル読取より前に、コマンド固有の CLI 契約を検査する。 */
@@ -130,6 +148,12 @@ export function validateArgs(args: ParsedArgs): void {
     if (!VALUE_FLAGS.has(flag) && value !== true) {
       throw new Error(`${flag} は値を取りません`);
     }
+  }
+  for (const [flag, values] of args.repeatedFlags) {
+    if (!allowed.has(flag)) {
+      throw new Error(`コマンド ${args.command} ではフラグ ${flag} を使用できません（未知または不適用）`);
+    }
+    if (values.length === 0) throw new Error(`${flag} には値が必要です`);
   }
   const expected = POSITIONAL_COUNTS[args.command];
   if (args.positional.length !== expected) {
@@ -150,7 +174,30 @@ export function validateArgs(args: ParsedArgs): void {
     throw new Error("--json / --sample は --dry-run との併用時のみ指定できます");
   }
   validateOrchestratorArgs(args);
+  validateImportArgs(args);
   validateLockRecoveryArgs(args);
+}
+
+function validateImportArgs(args: ParsedArgs): void {
+  if (args.command !== "run") return;
+  const parsed = parseImportInputs(
+    repeatedStringFlags(args, "--import-csv"),
+    repeatedStringFlags(args, "--import-json"),
+    repeatedStringFlags(args, "--expected-import-sha256")
+  );
+  const orchestrator = ORCHESTRATOR_FLAGS.every((flag) => args.flags.has(flag));
+  if (orchestrator) {
+    for (const source of parsed.sources) {
+      if (!parsed.expectedSha256.has(source.name)) {
+        throw new Error(`IMPORT source "${source.name}" のexpected sha256がありません`);
+      }
+    }
+  }
+  for (const name of parsed.expectedSha256.keys()) {
+    if (!parsed.sources.some((source) => source.name === name)) {
+      throw new Error(`expected sha256 に余剰なIMPORT source "${name}" があります`);
+    }
+  }
 }
 
 function validateLockRecoveryArgs(args: ParsedArgs): void {
@@ -226,6 +273,10 @@ function boolFlag(args: ParsedArgs, name: string): boolean {
   return args.flags.get(name) === true;
 }
 
+function repeatedStringFlags(args: ParsedArgs, name: string): string[] {
+  return args.repeatedFlags.get(name) ?? [];
+}
+
 const USAGE = `kSQL Flow — kintone バッチランナー (MIT, as-is)
 
 使い方:
@@ -236,6 +287,9 @@ const USAGE = `kSQL Flow — kintone バッチランナー (MIT, as-is)
                 [--max-api-calls N] [--lock local-only] [--force-unlock]
                 [--result-json <path|-> --correlation-id <id>
                  --attempt-id <id> --expected-job-id <id>]
+                [--import-csv <name>=<absolute-path>]...
+                [--import-json <name>=<absolute-path>]...
+                [--expected-import-sha256 <name>=<64hex>]...
   ksql-flow run-all <jobsDir> [--profile p] [--as-of ISO8601] [--dry-run]
                 [--sample 1..50] [--json]
                 [--resume | --resume-batch batch_id] [--from file.sql] [--only file.sql]
@@ -441,6 +495,12 @@ function runOptionsFromArgs(args: ParsedArgs) {
   const sample = stringFlag(args, "--sample");
   const lock = stringFlag(args, "--lock");
   const orchestrator = orchestratorOptionsFromArgs(args);
+  const imports = parseImportInputs(
+    repeatedStringFlags(args, "--import-csv"),
+    repeatedStringFlags(args, "--import-json"),
+    repeatedStringFlags(args, "--expected-import-sha256")
+  );
+  const hasImportOptions = imports.sources.length > 0 || imports.expectedSha256.size > 0;
   if (lock !== undefined && lock !== "local-only") {
     throw Object.assign(new Error(`--lock の値が不正です: ${lock}（指定できるのは local-only のみ）`), {
       exitCode: EXIT.VALIDATION,
@@ -455,6 +515,10 @@ function runOptionsFromArgs(args: ParsedArgs) {
     json: boolFlag(args, "--json"),
     lockLocalOnly: lock === "local-only",
     forceUnlock: boolFlag(args, "--force-unlock"),
+    ...(hasImportOptions ? {
+      importSources: imports.sources,
+      expectedImportSha256: imports.expectedSha256,
+    } : {}),
     ...(orchestrator ?? {}),
   };
 }

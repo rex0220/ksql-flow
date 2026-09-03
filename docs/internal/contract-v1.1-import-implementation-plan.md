@@ -358,6 +358,13 @@ contract testは責務ごとに分け、単一巨大E2Eだけで合格にしな�
 
 静的testやmockだけを実機確認済みとは記録しない。実機でprocess killを行う場合は確定chunk、再実行後件数、key重複0、Execution Result sha一致を証跡化する。
 
+### 7.x decodeCsvの実測エッジケース(2026-09-03 engine側実測 — fixture設計の前提)
+
+- LF/CRLF・末尾改行の有無はrows同値。BOMは除去。quoted cell内のLF/CRLFは1 record
+- 多列CSVの空行(途中・末尾)は「CSV row N has 1 cells; expected M」でthrow(B178通知なし)
+- **1列CSVの末尾空行は空値のdata rowとして+1に数える**( → rows=2)。fixtureはこの罠を踏まない構成とし、罠自体もテストで固定する
+- headerのみのCSVは「CSV has no data rows」でthrow(通知なし)。NO HEADER COLUMNS(…)は全recordがdata row
+
 ## 8. 文書更新
 
 `docs/ksql_flow_spec.md` に既存DML節の注記ではなく独立した「IMPORT」節を追加し、少なくとも次を正本化する。

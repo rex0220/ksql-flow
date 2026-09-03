@@ -5,6 +5,39 @@ import { main, parseArgs, validateArgs } from "../../src/cli";
 import { EXIT } from "../../src/types";
 
 describe("CLI public contract", () => {
+  test("IMPORT flags are repeatable and preserve = in absolute paths", () => {
+    const args = parseArgs([
+      "run", "-f", "job.sql",
+      "--import-csv", "first=C:\\input\\a=b.csv",
+      "--import-csv=second=C:\\input\\second.csv",
+      "--import-json", "third=C:\\input\\third.json",
+    ]);
+    expect(args.repeatedFlags.get("--import-csv")).toEqual([
+      "first=C:\\input\\a=b.csv", "second=C:\\input\\second.csv",
+    ]);
+    expect(() => validateArgs(args)).not.toThrow();
+  });
+
+  test.each([
+    [["run", "-f", "job.sql", "--import-csv", "bad"], /name.*value|形式/],
+    [["run", "-f", "job.sql", "--import-csv", "x=relative.csv"], /絶対 path/],
+    [["run", "-f", "job.sql", "--import-csv", "x=C:\\a.csv", "--import-json", "x=C:\\a.json"], /重複/],
+    [["run", "-f", "job.sql", "--expected-import-sha256", "x=abc"], /64桁/],
+  ])("rejects invalid IMPORT CLI input", (argv, expected) => {
+    expect(() => validateArgs(parseArgs(argv as string[]))).toThrow(expected as RegExp);
+  });
+
+  test("orchestrator requires a one-to-one expected sha256 set", () => {
+    const base = [
+      "run", "-f", "job.sql", "--result-json", "-", "--correlation-id", "c",
+      "--attempt-id", "a", "--expected-job-id", "j", "--import-csv", "sales=C:\\sales.csv",
+    ];
+    expect(() => validateArgs(parseArgs(base))).toThrow(/expected sha256/);
+    expect(() => validateArgs(parseArgs([
+      ...base, "--expected-import-sha256", `sales=${"a".repeat(64)}`,
+    ]))).not.toThrow();
+  });
+
   test.each([
     ["validate", ["validate", "-f", "job.sql", "--strict", "--check-logapp"]],
     ["validate-all", ["validate-all", "jobs", "--strict"]],

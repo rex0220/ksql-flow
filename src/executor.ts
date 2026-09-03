@@ -6,6 +6,7 @@ import {
   disposeExecutionContext,
   executeStatement,
   isDmlResult,
+  validateScript,
   version as engineVersion,
   type ExecutionContext,
   type FlowChunkWrittenInfo,
@@ -22,6 +23,7 @@ import { LogAppClient, LogRecordFields, toKintoneDateTime, truncateDetail } from
 import { JsonlLogger } from "./logging/jsonl";
 import { maskFieldValue, SecretMasker, stripSqlLiterals } from "./logging/mask";
 import { EXIT, JobOutcome, JobStatus } from "./types";
+import type { ImportSourceRegistry } from "./importSources";
 
 /** チェックポイント更新の間隔（書込チャンク数）。設計書 5.1-2 の「定期的に」の実装値 */
 const CHECKPOINT_EVERY_CHUNKS = 25;
@@ -59,6 +61,9 @@ export interface RunJobParams {
   correlation?: { correlationId: string; attemptId: string };
   /** 単一 run の cooperative cancel。run-all は渡さないため従来挙動のまま。 */
   cancellation?: CancellationToken;
+  importSources?: ImportSourceRegistry;
+  preloadImportSources?: boolean;
+  strict?: boolean;
 }
 
 // package.json の version を正とする（ハードコードだと npm version 更新に追随できず、
@@ -126,6 +131,32 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
       deletedCount: 0,
       apiCalls: 0,
     };
+  }
+
+  if (params.importSources !== undefined) {
+    const diagnostics = await validateScript(job.source, {
+      apps: Object.fromEntries(Object.entries(env.profile.apps).map(([name, app]) => [name, app.id])),
+      client: env.client,
+      strict: params.strict,
+      enableImport: true,
+    });
+    const errors = diagnostics.filter((diagnostic) => diagnostic.severity === "error");
+    if (errors.length > 0) {
+      const message = errors.map((d) => `${d.code} ${d.message} (${d.line}:${d.column})`).join("\n");
+      env.out(`  検証エラー: ${message}`);
+      return {
+        ...outcomeBase,
+        status: "FAILED",
+        exitCode: EXIT.VALIDATION,
+        errorMessage: message,
+        finishedAt: new Date(),
+        readCount: 0,
+        writtenCount: 0,
+        deletedCount: 0,
+        apiCalls: 0,
+      };
+    }
+    if (params.preloadImportSources === true) await params.importSources.preloadUsed();
   }
 
   const baseFields: LogRecordFields = {
@@ -244,6 +275,10 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
       ...(env.profile.limits.maxReadRows !== null ? { maxRecords: env.profile.limits.maxReadRows } : {}),
       ...(env.profile.limits.maxTempRows !== null ? { tempTableMaxRows: env.profile.limits.maxTempRows } : {}),
       onChunkWritten,
+      ...(params.importSources !== undefined ? {
+        enableImport: true,
+        importSource: params.importSources.resolver,
+      } : {}),
     });
 
     let sawNoData = false;

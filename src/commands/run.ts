@@ -23,6 +23,12 @@ import { createRunnerEnv, effectiveTimeoutMs, parseAsOf, RunnerEnvBundle } from 
 import { EXIT, ExitCode, JobOutcome } from "../types";
 import { dryRunJob } from "./dryrun";
 import { printRunningTargets } from "./unlock";
+import {
+  collectRequiredImportSources,
+  ImportSourceRegistry,
+  InputFileMutatedError,
+  type ImportSourceInput,
+} from "../importSources";
 
 export interface RunOptions {
   asOf?: string;
@@ -41,6 +47,8 @@ export interface RunOptions {
   correlationId?: string;
   attemptId?: string;
   expectedJobId?: string;
+  importSources?: readonly ImportSourceInput[];
+  expectedImportSha256?: ReadonlyMap<string, string>;
 }
 
 export interface OrchestratorRunOptions extends RunOptions {
@@ -98,12 +106,32 @@ async function runStandaloneCommand(
   let jobKey: string;
   let asOf: Date;
   try {
-    job = loadJobFile(filePath, appIdMap(profile));
+    job = loadJobFile(filePath, appIdMap(profile), { enableImport: true });
     jobKey = buildJobKey(profile.name, job.name);
     asOf = parseAsOf(options.asOf);
   } catch (error) {
     out(`エラー: ${errorMessage(error)}`);
     return EXIT.VALIDATION;
+  }
+
+  let importRegistry: ImportSourceRegistry | undefined;
+  const requiredImportSources = collectRequiredImportSources(job.parsed.statements);
+  if (options.importSources !== undefined || requiredImportSources.length > 0) {
+    try {
+      importRegistry = new ImportSourceRegistry(
+        options.importSources ?? [],
+        requiredImportSources,
+        false,
+        options.expectedImportSha256 ?? new Map(),
+        (message) => {
+          out(message);
+          env.jsonl.append("unused_import_source", { message });
+        }
+      );
+    } catch (error) {
+      out(`エラー: ${errorMessage(error)}`);
+      return EXIT.VALIDATION;
+    }
   }
 
   if (options.dryRun === true) {
@@ -165,6 +193,8 @@ async function runStandaloneCommand(
       timeoutMs: effectiveTimeoutMs(job.timeoutSec, batchDeadline),
       jobKey,
       cancellation,
+      importSources: importRegistry,
+      strict: options.strict,
     });
   } catch (error) {
     if (error instanceof LockedError) {
@@ -284,6 +314,8 @@ async function runOrchestratedCommand(
   let executionStartedAt: Date | null = null;
   let ranJob = false;
   let completedJob = false;
+  let importRegistry: ImportSourceRegistry | undefined;
+  let inputFileMutated = false;
 
   try {
     validateOrchestratorOptions(profile, options);
@@ -301,7 +333,7 @@ async function runOrchestratedCommand(
     });
     out = env.out;
 
-    const job = loadJobFile(filePath, appIdMap(profile));
+    const job = loadJobFile(filePath, appIdMap(profile), { enableImport: true });
     if (job.name !== options.expectedJobId) {
       throw new ConfigError(
         `--expected-job-id がジョブ論理名と一致しません: expected=${options.expectedJobId}, actual=${job.name}`
@@ -310,6 +342,17 @@ async function runOrchestratedCommand(
     const jobKey = buildJobKey(profile.name, job.name);
     asOf = parseAsOf(options.asOf);
     asOfEcho = options.asOf ?? asOf.toISOString();
+
+    const requiredImportSources = collectRequiredImportSources(job.parsed.statements);
+    if (options.importSources !== undefined || requiredImportSources.length > 0) {
+      importRegistry = new ImportSourceRegistry(
+        options.importSources ?? [],
+        requiredImportSources,
+        true,
+        options.expectedImportSha256 ?? new Map(),
+        (message) => out(message)
+      );
+    }
 
     await env.logApp!.requireFields(ORCHESTRATOR_LOG_APP_FIELD_CODES);
 
@@ -344,6 +387,9 @@ async function runOrchestratedCommand(
         if (code !== undefined) observedExecutionErrorCode = code;
       },
       cancellation,
+      importSources: importRegistry,
+      preloadImportSources: importRegistry !== undefined,
+      strict: options.strict,
     });
     completedJob = true;
 
@@ -359,6 +405,14 @@ async function runOrchestratedCommand(
     if (outcome.status === "CANCELLED") failureKind = "CANCELLED";
   } catch (error) {
     cause = error;
+    const providerCode = typeof error === "object" && error !== null
+      ? (error as { code?: unknown }).code
+      : undefined;
+    if (typeof providerCode === "string") diagnosticCode = providerCode;
+    if (error instanceof InputFileMutatedError) {
+      inputFileMutated = true;
+      diagnosticCode = error.code;
+    }
     const exitCode = orchestratorExitCode(error, ranJob);
     if (error instanceof LockedError) {
       outcome = syntheticOutcome(options.expectedJobId, filePath, "LOCKED", EXIT.LOCKED, errorMessage(error));
@@ -426,6 +480,8 @@ async function runOrchestratedCommand(
       ...(diagnosticCode !== undefined ? { code: diagnosticCode } : {}),
       ...(finalOutcome.errorMessage !== undefined ? { message: finalOutcome.errorMessage } : {}),
     },
+    inputFiles: importRegistry?.snapshotInputFiles() ?? [],
+    ...(inputFileMutated ? { validationFailureKind: "INPUT_FILE_MUTATED" as const } : {}),
     masker: env?.masker ?? fallbackMasker,
   });
 
@@ -493,6 +549,7 @@ export function writeOrchestratorStartupFailure(
     ...(exitCode === EXIT.RUNTIME ? { failureKind: "INTERNAL_ERROR" as const } : {}),
     cause: error,
     error: { message: errorMessage(error) },
+    inputFiles: [],
     masker,
   });
   console.error(masker.mask(`エラー: ${errorMessage(error)}`));

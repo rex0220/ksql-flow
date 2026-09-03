@@ -28,6 +28,7 @@ export const KNOWN_RESULT_CODES = [
   "INTERNAL_ERROR",
   "CANCELLED",
   "LOCK_CONFLICT",
+  "INPUT_FILE_MUTATED",
 ] as const;
 
 export type KnownResultCode = (typeof KNOWN_RESULT_CODES)[number];
@@ -60,6 +61,14 @@ export interface ExecutionResultError {
   detailsTruncated: boolean;
 }
 
+export interface InputFileReceipt {
+  name: string;
+  sha256: string;
+  bytes: number;
+  rows?: number;
+  encoding?: "UTF8" | "SJIS";
+}
+
 export interface ExecutionResult {
   formatVersion: typeof EXECUTION_RESULT_FORMAT_VERSION;
   kind: typeof EXECUTION_RESULT_KIND;
@@ -85,6 +94,7 @@ export interface ExecutionResult {
   lastWrittenKey: string | null;
   ksqlFlowVersion: string;
   engineVersion: string;
+  input_files: InputFileReceipt[];
   error: ExecutionResultError | null;
 }
 
@@ -124,6 +134,8 @@ export interface NormalizeExecutionResultContext {
   /** Exit 3 の AUTH / API / LOCK / INTERNAL 判定に使う元例外。 */
   cause?: unknown;
   error?: ExecutionErrorInput;
+  inputFiles: readonly InputFileReceipt[];
+  validationFailureKind?: "INPUT_FILE_MUTATED";
   /** controlled failure でも必ず明示し、error.message と診断キーに適用する。 */
   masker: Pick<SecretMasker, "mask">;
 }
@@ -148,6 +160,7 @@ const ERROR_DEFAULTS: Record<
   INTERNAL_ERROR: { category: "INTERNAL", code: "INTERNAL_ERROR", message: "internal runner error" },
   CANCELLED: { category: "CANCELLED", code: "CANCELLED", message: "execution was cancelled" },
   LOCK_CONFLICT: { category: "LOCK", code: "LOCK_CONFLICT", message: "job lock is already held" },
+  INPUT_FILE_MUTATED: { category: "CONFIG", code: "INPUT_FILE_MUTATED", message: "input file did not match expected sha256" },
 };
 
 /**
@@ -194,6 +207,7 @@ export function normalizeJobOutcome(
         : null,
     ksqlFlowVersion: requireNonEmpty(context.ksqlFlowVersion, "ksqlFlowVersion"),
     engineVersion: requireNonEmpty(context.engineVersion, "engineVersion"),
+    input_files: context.inputFiles.map((item) => ({ ...item })),
     error: isFailureResultCode(disposition.resultCode)
       ? buildExecutionError(disposition.resultCode, outcome, context)
       : null,
@@ -235,6 +249,9 @@ function resolveDisposition(outcome: JobOutcome, context: NormalizeExecutionResu
       return { status: "FAILED", resultCode: "LOCK_CONFLICT", exitCode: EXIT.LOCKED };
     case "FAILED":
       if (outcome.exitCode === EXIT.VALIDATION) {
+        if (!context.executionStarted && context.validationFailureKind === "INPUT_FILE_MUTATED") {
+          return { status: "FAILED", resultCode: "INPUT_FILE_MUTATED", exitCode: EXIT.VALIDATION };
+        }
         return context.executionStarted
           ? { status: "FAILED", resultCode: "SQL_ERROR", exitCode: EXIT.VALIDATION }
           : { status: "FAILED", resultCode: "VALIDATION_ERROR", exitCode: EXIT.VALIDATION };

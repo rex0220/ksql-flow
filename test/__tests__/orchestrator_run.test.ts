@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import * as crypto from "crypto";
 import Ajv2020 from "ajv/dist/2020";
 import { runCommand } from "../../src/commands/run";
 import { writeExecutionResult, type ExecutionResult } from "../../src/contract";
@@ -125,6 +126,50 @@ test("--result-json - は stdout に JSON object 1 個 + LF だけを書き、ID
   });
   expect(stderr.mock.calls.flat().join("\n")).toContain("[RUN]");
   expect(stderr.mock.calls.flat().join("\n")).toContain("=> NO_DATA");
+});
+
+test("orchestrator preloads and hashes IMPORT bytes before SQL and emits input_files without rows", async () => {
+  world = buildWorld();
+  const file = writeJob(world, "01_import.sql", `-- @ksql name: monthly_sales_sync
+-- @ksql dialect: 1
+IMPORT INTO LAPP_顧客マスタ (顧客コード, 当月売上実績) FROM CSV sales ON DUPLICATE (顧客コード);
+`);
+  const input = path.join(world.dir, "sales.csv");
+  const bytes = Buffer.from("顧客コード,当月売上実績\nC1,100\n", "utf8");
+  fs.writeFileSync(input, bytes);
+  const hash = crypto.createHash("sha256").update(bytes).digest("hex");
+  const target = path.join(world.dir, "import-result.json");
+  expect(await runCommand(world.profile, file, options(target, {
+    importSources: [{ name: "sales", kind: "CSV", absolutePath: input }],
+    expectedImportSha256: new Map([["sales", hash]]),
+  }))).toBe(EXIT.OK);
+  const result = readResult(target);
+  expect(result.input_files).toEqual([{ name: "sales", sha256: hash, bytes: bytes.length }]);
+  expect(result.input_files[0]).not.toHaveProperty("rows");
+});
+
+test("orchestrator sha mismatch is INPUT_FILE_MUTATED before execution with zero target mutation", async () => {
+  world = buildWorld();
+  const file = writeJob(world, "01_import.sql", `-- @ksql name: monthly_sales_sync
+IMPORT INTO LAPP_顧客マスタ (顧客コード) FROM CSV sales;
+`);
+  const input = path.join(world.dir, "sales.csv");
+  fs.writeFileSync(input, "顧客コード\nSECRET_CELL\n");
+  const target = path.join(world.dir, "mismatch.json");
+  expect(await runCommand(world.profile, file, options(target, {
+    importSources: [{ name: "sales", kind: "CSV", absolutePath: input }],
+    expectedImportSha256: new Map([["sales", "0".repeat(64)]]),
+  }))).toBe(EXIT.VALIDATION);
+  const result = readResult(target);
+  expect(result).toMatchObject({
+    resultCode: "INPUT_FILE_MUTATED", executionStarted: false, input_files: [],
+    error: { category: "CONFIG", code: "INPUT_FILE_MUTATED" },
+  });
+  expect(JSON.stringify(result)).not.toContain(input);
+  expect(JSON.stringify(result)).not.toContain("SECRET_CELL");
+  expect(world.mock.requests.filter((request) =>
+    request.appId === 200 && ["POST", "PUT", "DELETE"].includes(request.method)
+  )).toHaveLength(0);
 });
 
 test("orchestrator JOB と JSONL 全イベントへ相関値を記録し、書込 chunk 数を結果へ渡す", async () => {
