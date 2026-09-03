@@ -217,6 +217,29 @@ IMPORT INTO LAPP_顧客マスタ (顧客コード, 当月売上実績) FROM CSV 
   ]);
 });
 
+test("B178 rows: 成功解釈と未達解釈の混在では成功entryのみ載せ、base entryを併記しない(裁定1bの固定)", async () => {
+  world = buildWorld();
+  const file = writeJob(world, "01_import.sql", `-- @ksql name: monthly_sales_sync
+-- @ksql dialect: 1
+IMPORT INTO LAPP_顧客マスタ (顧客コード) FROM CSV sales ON DUPLICATE (顧客コード);
+IMPORT INTO LAPP_顧客マスタ (顧客コード) FROM CSV sales ENCODING SJIS ON DUPLICATE (顧客コード);
+`);
+  const input = path.join(world.dir, "sales.csv");
+  // 日本語ヘッダのUTF-8 bytes: 1文目(UTF-8)は成功、2文目(SJIS解釈)はdecode失敗
+  const bytes = Buffer.from("顧客コード\nC1\n", "utf8");
+  fs.writeFileSync(input, bytes);
+  const hash = crypto.createHash("sha256").update(bytes).digest("hex");
+  const target = path.join(world.dir, "mixed.json");
+  expect(await runCommand(world.profile, file, options(target, {
+    importSources: [{ name: "sales", kind: "CSV", absolutePath: input }],
+    expectedImportSha256: new Map([["sales", hash]]),
+  }))).not.toBe(EXIT.OK);
+  const result = readResult(target);
+  expect(result.input_files).toEqual([
+    { name: "sales", sha256: hash, bytes: bytes.length, rows: 1, encoding: "UTF8" },
+  ]);
+});
+
 test("B178 rows: SJIS decode失敗はreceipt無し — input_filesはsha256/bytesのみでencodingも載らない", async () => {
   world = buildWorld();
   const file = writeJob(world, "01_import.sql", `-- @ksql name: monthly_sales_sync

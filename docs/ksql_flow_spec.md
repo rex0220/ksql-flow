@@ -256,7 +256,7 @@ ksql-flow run -f monthly.sql --profile p --as-of t \
 
 **検査(fail-closed)**: 同名 source の重複供給・SQL が要求する source の未供給・expected sha256 の欠落(orchestrator)・余剰・不一致は実行前エラーです。供給されたが SQL で使われない source は警告になります。sha256 は engine へ渡す同一 bytes から計算し、不一致(`INPUT_FILE_MUTATED`)は SQL 開始前に拒否します。ファイルは通常ファイルのみ、上限 10 MiB です。
 
-**Execution Result への記録**: 読み込んだ source は `input_files: [{name, sha256, bytes, rows?, encoding?}]` として結果 JSON に載ります。`rows`(RFC 4180 解析後の data record 数。header 除外・quoted 改行は 1 record・1 列 CSV の末尾空行は空値の data row として +1)と実効 `encoding` は、engine の materialize 成功時(receipt)にのみ確定します。decode 失敗・maxRecords 超過など materialize 未達の source は sha256/bytes のみです。同一 source を異なる `ENCODING` の複数文が読むと、解釈ごとに別 entry になります。絶対パス・セル値は結果 JSON に含めません。
+**Execution Result への記録**: 読み込んだ source は `input_files: [{name, sha256, bytes, rows?, encoding?}]` として結果 JSON に載ります。`rows`(RFC 4180 解析後の data record 数。header 除外・quoted 改行は 1 record・1 列 CSV の末尾空行は空値の data row として +1)と実効 `encoding` は、engine の materialize 成功時(receipt)にのみ確定します。`input_files` は materialize に成功した解釈のみを列挙します。同一 source について receipt が1件以上得られた場合、成功した解釈の entry だけを載せ、未達解釈を表す sha256/bytes-only entry は追加しません。その source で receipt が1件も得られなかった場合(decode 失敗・maxRecords 超過など)に限り、sha256/bytes のみの entry を1件載せます。同一 source を異なる `ENCODING` の複数文が読むと、成功した解釈ごとに別 entry になります。絶対パス・セル値は結果 JSON に含めません。
 
 capability は `features.importCsv: true`(v0.8.0 以降・engine v3.76.0 以降)で公開します。
 
