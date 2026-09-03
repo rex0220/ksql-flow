@@ -233,6 +233,33 @@ ksql-flow（本リポジトリ・MIT）
 * **エンジン API の公開契約化**: ksql-flow が依存するエンジン API（AST・実行計画・クエリ実行）は `@rex0220/kintone-sql-tools` の公式 API（`/flow` サブパス）として切り出し、semver で管理します。エンジンバージョン × dialect の互換表を両リポジトリの README に掲示します。
 * **エコシステム上の位置付け**: SQL 方言と MCP を含むツールチェーン全体がオープンであることは、kintone における As Code 運用の共通基盤（標準候補）としての採用・派生・他ツールからの対応実装を最大化するための選択です。互換ランナーやフォークの出現は歓迎します。
 
+### 3.9 IMPORT(CSV / JSON 取込) — Contract v1.1
+
+外部ファイルの取込は、CLI の名前付き source と SQL の `IMPORT` 文で行います。SQL はファイルパスを持たず、source 名だけを参照します(off-by-default: source を供給しない実行では `IMPORT` は拒否されます)。
+
+```sql
+IMPORT INTO LAPP_売上 (顧客コード, 金額) FROM CSV sales ENCODING SJIS
+  ON DUPLICATE (顧客コード)
+  ON ERROR SKIP INTO #err;
+ASSERT (SELECT COUNT(*) FROM #err) = 0;
+```
+
+```bash
+ksql-flow run -f monthly.sql --profile p --as-of t \
+  --import-csv sales=/abs/path/sales_2026-08.csv \
+  --expected-import-sha256 sales=<64hex>   # orchestrator mode では必須
+```
+
+句順は `FROM CSV <name> [ENCODING UTF8|SJIS]` のあとに `ON DUPLICATE` / `ON ERROR SKIP INTO` / `CHECK WHEN` / `VALIDATE ONLY` を置きます。JSON source(`FROM JSON <name>`)に `ENCODING` 句は指定できません。文字コードの正は SQL の `ENCODING` 句で、省略時は supplier metadata、次に UTF-8 です。
+
+**再実行と冪等性**: 素の `IMPORT`(INSERT)は再実行で行が重複し得ます。resume・リトライがある運用では、**重複禁止の単一キーによる `ON DUPLICATE` upsert を推奨**します(書込 chunk が途中で失敗しても、同じ source の再実行が同じキーへ収束します)。
+
+**検査(fail-closed)**: 同名 source の重複供給・SQL が要求する source の未供給・expected sha256 の欠落(orchestrator)・余剰・不一致は実行前エラーです。供給されたが SQL で使われない source は警告になります。sha256 は engine へ渡す同一 bytes から計算し、不一致(`INPUT_FILE_MUTATED`)は SQL 開始前に拒否します。ファイルは通常ファイルのみ、上限 10 MiB です。
+
+**Execution Result への記録**: 読み込んだ source は `input_files: [{name, sha256, bytes, rows?, encoding?}]` として結果 JSON に載ります。`rows`(RFC 4180 解析後の data record 数。header 除外・quoted 改行は 1 record・1 列 CSV の末尾空行は空値の data row として +1)と実効 `encoding` は、engine の materialize 成功時(receipt)にのみ確定します。decode 失敗・maxRecords 超過など materialize 未達の source は sha256/bytes のみです。同一 source を異なる `ENCODING` の複数文が読むと、解釈ごとに別 entry になります。絶対パス・セル値は結果 JSON に含めません。
+
+capability は `features.importCsv: true`(v0.8.0 以降・engine v3.76.0 以降)で公開します。
+
 ---
 
 ## 4. 複数ジョブのオーケストレーション構成

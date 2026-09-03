@@ -97,6 +97,7 @@ describe("KF-03 machine-readable inspection commands", () => {
         inspectJob: true,
         durableExecutionStarted: true,
         gracefulCancel: true,
+        importCsv: true,
         jobLockProtocol: "profile-job-v0",
       },
     });

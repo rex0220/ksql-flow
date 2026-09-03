@@ -2,6 +2,11 @@
 
 このプロジェクトの主な変更を記録します。
 
+## [0.8.0] - 2026-09-04
+
+- Execution Contract v1.1: 名前付き IMPORT source(repeatable の `--import-csv` / `--import-json`)と orchestrator 必須の `--expected-import-sha256`(SQL 開始前照合・不一致は INPUT_FILE_MUTATED で mutation 0)を追加。engine v3.76.0 の公開 API(createImportSourceResolver / onImportSourceMaterialized)だけで配線し、Execution Result へ additive な `input_files`(name / sha256 / bytes / rows? / encoding?)を記録します。rows と実効 encoding は engine の materialize receipt 成功時のみ確定し、同一 source を異なる ENCODING で読むと解釈ごとに別 entry になります。
+- capability `features.importCsv: true` を公開(engine ^3.76.0)。同名 source 重複・未供給・sha 欠落/余剰/不一致は実行前エラー、未使用供給は警告。ファイルは通常ファイルのみ・10 MiB 上限・絶対パス/セル値は結果 JSON 非含有。仕様 §3.9 に IMPORT 独立節を追加(素の IMPORT は再実行で重複し得るため、重複禁止単一キーの ON DUPLICATE upsert を推奨)。
+
 ## [0.7.0] - 2026-08-30
 
 - FlowNet 等の orchestrator から単一 `run` を安全に呼び出す 4 フラグ（`--result-json` / `--correlation-id` / `--attempt-id` / `--expected-job-id`）を追加。Execution Result v1 の正本 JSON Schema を同梱し、stdout 純 JSON、path の atomic 書込・既存ファイル上書き拒否、ID 照合、controlled failure の機械可読結果を契約化しました。

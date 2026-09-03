@@ -199,6 +199,7 @@ ksql-flow run-all jobs --profile stg --dry-run --json > dry-run.json
 
 | ksql-flow | @rex0220/kintone-sql-tools | dialect |
 | --- | --- | --- |
+| **0.8.0** | **^3.76.0**（IMPORT source 供給と rows receipt — importCsv capability） | **1** |
 | **0.4.0〜0.7.0** | **^3.74.0**（native upsert 既定 ON — 3.4 参照） | **1** |
 | 0.1.0〜0.3.1 | ^3.71.0 | 1 |
 

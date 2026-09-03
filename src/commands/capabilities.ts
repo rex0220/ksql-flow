@@ -22,6 +22,9 @@ export function capabilitiesCommand(): ExitCode {
       inspectJob: true,
       durableExecutionStarted: true,
       gracefulCancel: true,
+      // Contract v1.1: CLI parse・source loader・engine /flow実行・期待sha256
+      // 検証・rows receipt(B178)の全経路が揃ったbuildでのみtrue。
+      importCsv: true,
       jobLockProtocol: "profile-job-v0",
     },
   });

@@ -4,6 +4,7 @@ import * as path from "path";
 import {
   createImportSourceResolver,
   FlowImportProviderError,
+  type FlowImportSourceMaterializedInfo,
   type FlowImportSourceResolver,
   type FlowImportSourcePayload,
   type Statement,
@@ -182,16 +183,51 @@ export class ImportSourceRegistry {
     }
   }
 
+  /**
+   * B178 receipt(engine v3.76.0 onImportSourceMaterialized)を記録する。
+   * engineは文をまたいでdedupeしないため、metadata同値({name, kind, rows,
+   * encoding})はここで1 entryへ畳む。同名でmetadataが異なる場合(例: 別の
+   * ENCODING句)は監査上区別すべき別entryとして保持する。statementIndexは
+   * occurrence識別子であり、input_filesへは載せない。
+   */
+  recordMaterialized(info: FlowImportSourceMaterializedInfo): void {
+    const encoding: "UTF8" | "SJIS" = info.encoding === "sjis" ? "SJIS" : "UTF8";
+    const exists = this.materialized.some((item) =>
+      item.name === info.name && item.kind === info.kind &&
+      item.rows === info.rows && item.encoding === encoding);
+    if (!exists) this.materialized.push({ name: info.name, kind: info.kind, rows: info.rows, encoding });
+  }
+
   snapshotInputFiles(): InputFileReceipt[] {
     const receipts: InputFileReceipt[] = [];
     for (const [name, promise] of this.loaded) {
       // Settled values are mirrored synchronously by load() into loadedValues.
       const value = this.loadedValues.get(name);
-      if (value !== undefined) receipts.push(value.receipt);
+      if (value !== undefined) {
+        // receiptを受けたsourceはrows+実効encodingを確定値として載せる。
+        // 受けていないsource(decode失敗・maxRecords超過等)はrows省略のまま。
+        const materialized = this.materialized
+          .filter((item) => item.name === name)
+          .sort((a, b) => a.encoding === b.encoding ? a.rows - b.rows : compareNames(a.encoding, b.encoding));
+        if (materialized.length === 0) {
+          receipts.push(value.receipt);
+        } else {
+          for (const item of materialized) {
+            receipts.push({ ...value.receipt, rows: item.rows, encoding: item.encoding });
+          }
+        }
+      }
       void promise;
     }
     return receipts.sort((a, b) => compareNames(a.name, b.name));
   }
+
+  private readonly materialized: {
+    readonly name: string;
+    readonly kind: ImportKind;
+    readonly rows: number;
+    readonly encoding: "UTF8" | "SJIS";
+  }[] = [];
 
   private readonly loadedValues = new Map<string, LoadedSource>();
 

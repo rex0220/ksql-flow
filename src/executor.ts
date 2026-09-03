@@ -278,6 +278,9 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
       ...(params.importSources !== undefined ? {
         enableImport: true,
         importSource: params.importSources.resolver,
+        // B178 receipt: materialize成功ごとにrows/実効encodingを記録し、
+        // Execution Resultのinput_filesへ確定値として載せる。
+        onImportSourceMaterialized: (info) => params.importSources!.recordMaterialized(info),
       } : {}),
     });
 

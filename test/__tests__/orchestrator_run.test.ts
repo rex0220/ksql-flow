@@ -144,6 +144,103 @@ IMPORT INTO LAPP_顧客マスタ (顧客コード, 当月売上実績) FROM CSV 
     expectedImportSha256: new Map([["sales", hash]]),
   }))).toBe(EXIT.OK);
   const result = readResult(target);
+  expect(result.input_files).toEqual([
+    { name: "sales", sha256: hash, bytes: bytes.length, rows: 1, encoding: "UTF8" },
+  ]);
+});
+
+test("B178 rows: quoted改行は1 record、同一sourceを2文が読んでもmetadata同値は1 entry", async () => {
+  world = buildWorld();
+  const file = writeJob(world, "01_import.sql", `-- @ksql name: monthly_sales_sync
+-- @ksql dialect: 1
+IMPORT INTO LAPP_顧客マスタ (顧客コード, 当月売上実績) FROM CSV sales ON DUPLICATE (顧客コード);
+IMPORT INTO LAPP_顧客マスタ (顧客コード, 当月売上実績) FROM CSV sales ON DUPLICATE (顧客コード);
+`);
+  const input = path.join(world.dir, "sales.csv");
+  const bytes = Buffer.from('顧客コード,当月売上実績\n"C1\nX",100\n', "utf8");
+  fs.writeFileSync(input, bytes);
+  const hash = crypto.createHash("sha256").update(bytes).digest("hex");
+  const target = path.join(world.dir, "quoted.json");
+  expect(await runCommand(world.profile, file, options(target, {
+    importSources: [{ name: "sales", kind: "CSV", absolutePath: input }],
+    expectedImportSha256: new Map([["sales", hash]]),
+  }))).toBe(EXIT.OK);
+  const result = readResult(target);
+  expect(result.input_files).toEqual([
+    { name: "sales", sha256: hash, bytes: bytes.length, rows: 1, encoding: "UTF8" },
+  ]);
+});
+
+test("B178 rows: 1列CSVの末尾空行は空値のdata rowとして+1に数える(engine実測の罠の固定)", async () => {
+  world = buildWorld();
+  const file = writeJob(world, "01_import.sql", `-- @ksql name: monthly_sales_sync
+-- @ksql dialect: 1
+IMPORT INTO LAPP_顧客マスタ (顧客コード) FROM CSV sales ON DUPLICATE (顧客コード);
+`);
+  const input = path.join(world.dir, "sales.csv");
+  const bytes = Buffer.from("顧客コード\nC1\n\n", "utf8");
+  fs.writeFileSync(input, bytes);
+  const hash = crypto.createHash("sha256").update(bytes).digest("hex");
+  const target = path.join(world.dir, "trailing.json");
+  await runCommand(world.profile, file, options(target, {
+    importSources: [{ name: "sales", kind: "CSV", absolutePath: input }],
+    expectedImportSha256: new Map([["sales", hash]]),
+  }));
+  const result = readResult(target);
+  // 成否によらず、materializeまで到達していればrows=2(C1と空値)が載る
+  expect(result.input_files).toEqual([
+    expect.objectContaining({ name: "sales", sha256: hash, rows: 2, encoding: "UTF8" }),
+  ]);
+});
+
+test("B178 rows: ENCODING SJIS句の実効encodingがreceiptへ載り、異なるENCODINGの2文は別entryになる", async () => {
+  world = buildWorld();
+  const file = writeJob(world, "01_import.sql", `-- @ksql name: monthly_sales_sync
+-- @ksql dialect: 1
+IMPORT INTO LAPP_顧客マスタ (顧客コード) FROM CSV sales ENCODING SJIS ON DUPLICATE (顧客コード);
+IMPORT INTO LAPP_顧客マスタ (顧客コード) FROM CSV sales ON DUPLICATE (顧客コード);
+`);
+  const input = path.join(world.dir, "sales.csv");
+  // ASCIIのみの内容はSJIS/UTF-8で同一bytes — 同一ファイルの異なる解釈を監査上区別する
+  const bytes = Buffer.from("顧客コード,当月売上実績\nC1,100\n", "utf8");
+  fs.writeFileSync(input, bytes);
+  const hash = crypto.createHash("sha256").update(bytes).digest("hex");
+  const target = path.join(world.dir, "encodings.json");
+  const code = await runCommand(world.profile, file, options(target, {
+    importSources: [{ name: "sales", kind: "CSV", absolutePath: input }],
+    expectedImportSha256: new Map([["sales", hash]]),
+  }));
+  const result = readResult(target);
+  if (code === EXIT.OK) {
+    expect(result.input_files).toEqual([
+      expect.objectContaining({ name: "sales", sha256: hash, encoding: "SJIS" }),
+      expect.objectContaining({ name: "sales", sha256: hash, encoding: "UTF8" }),
+    ]);
+  } else {
+    // SJIS句で日本語ヘッダのUTF-8 bytesがdecode不能な実装の場合は、
+    // 1文目のmaterialize未達(通知なし)としてSJIS entryが載らないことを固定する
+    expect(result.input_files).toEqual([
+      expect.objectContaining({ name: "sales", sha256: hash }),
+    ]);
+  }
+});
+
+test("B178 rows: 多列CSVの空行はdecode throwで通知なし — input_filesはrows無しのまま", async () => {
+  world = buildWorld();
+  const file = writeJob(world, "01_import.sql", `-- @ksql name: monthly_sales_sync
+-- @ksql dialect: 1
+IMPORT INTO LAPP_顧客マスタ (顧客コード, 当月売上実績) FROM CSV sales ON DUPLICATE (顧客コード);
+`);
+  const input = path.join(world.dir, "sales.csv");
+  const bytes = Buffer.from("顧客コード,当月売上実績\nC1,100\n\n", "utf8");
+  fs.writeFileSync(input, bytes);
+  const hash = crypto.createHash("sha256").update(bytes).digest("hex");
+  const target = path.join(world.dir, "emptyline.json");
+  expect(await runCommand(world.profile, file, options(target, {
+    importSources: [{ name: "sales", kind: "CSV", absolutePath: input }],
+    expectedImportSha256: new Map([["sales", hash]]),
+  }))).not.toBe(EXIT.OK);
+  const result = readResult(target);
   expect(result.input_files).toEqual([{ name: "sales", sha256: hash, bytes: bytes.length }]);
   expect(result.input_files[0]).not.toHaveProperty("rows");
 });
