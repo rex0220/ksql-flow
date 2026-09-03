@@ -362,7 +362,7 @@ contract testは責務ごとに分け、単一巨大E2Eだけで合格にしな�
 
 - LF/CRLF・末尾改行の有無はrows同値。BOMは除去。quoted cell内のLF/CRLFは1 record
 - 多列CSVの空行(途中・末尾)は「CSV row N has 1 cells; expected M」でthrow(B178通知なし)
-- **1列CSVの末尾空行は空値のdata rowとして+1に数える**( → rows=2)。fixtureはこの罠を踏まない構成とし、罠自体もテストで固定する
+- **1列CSVの末尾空行は空値のdata rowとして+1に数える**(内容が code,A,空行 の3行ファイル → rows=2)。fixtureはこの罠を踏まない構成とし、罠自体もテストで固定する
 - headerのみのCSVは「CSV has no data rows」でthrow(通知なし)。NO HEADER COLUMNS(…)は全recordがdata row
 
 ## 8. 文書更新
