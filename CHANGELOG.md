@@ -2,6 +2,12 @@
 
 このプロジェクトの主な変更を記録します。
 
+## [0.9.0] - 2026-09-04
+
+- Contract v1.1 CSV EXPORT sinkを単一 `run` に追加。反復可能な `--export-csv name=path`、単文SELECT用の `--export-csv path`、`--export-encoding utf8|sjis`、`--export-timezone` を engine ^3.77.0 の公開 `/flow` serializerへ配線しました。
+- 全 materialized sinkを先にmemory serializeしてから、同一directoryの一時fileへ全量write / fsync / close / renameします。not-createdは既存fileを変更せず、rename失敗でも旧file削除fallbackは行いません。SJISはproduction依存 `encoding-japanese@2` と `TextDecoder("shift_jis")` の完全round-tripで表現不能文字をfail-closedにします。
+- Execution Resultへpath非含有の `output_files: [{name, sha256, bytes, rows, encoding}]` をadditive追加し、`features.resultCsv: true` を公開。既存run / run-all / dry-run / IMPORTの挙動は維持し、exportはrun専用です。
+
 ## [0.8.0] - 2026-09-04
 
 - Execution Contract v1.1: 名前付き IMPORT source(repeatable の `--import-csv` / `--import-json`)と orchestrator 必須の `--expected-import-sha256`(SQL 開始前照合・不一致は INPUT_FILE_MUTATED で mutation 0)を追加。engine v3.76.0 の公開 API(createImportSourceResolver / onImportSourceMaterialized)だけで配線し、Execution Result へ additive な `input_files`(name / sha256 / bytes / rows? / encoding?)を記録します。rows と実効 encoding は engine の materialize receipt 成功時のみ確定し、同一 source を異なる ENCODING で読むと解釈ごとに別 entry になります。
@@ -78,6 +84,7 @@
 [0.5.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.5.0
 [0.4.1]: https://github.com/rex0220/ksql-flow/releases/tag/v0.4.1
 [0.8.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.8.0
+[0.9.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.9.0
 [0.7.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.7.0
 [0.4.0]: https://github.com/rex0220/ksql-flow/releases/tag/v0.4.0
 [0.3.1]: https://github.com/rex0220/ksql-flow/releases/tag/v0.3.1

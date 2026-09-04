@@ -118,6 +118,8 @@ ksql-flow run -f <file.sql> [--as-of ISO8601]      # 単一ジョブ実行
                --attempt-id <id> --expected-job-id <id>]
               [--import-csv name=path]... [--import-json name=path]...
               [--expected-import-sha256 name=64hex]...  # orchestrator では import ごとに必須
+              [--export-csv [name=]path]...
+              [--export-encoding utf8|sjis] [--export-timezone IANA-zone]
 ksql-flow run-all <jobsDir>                        # ディレクトリ一括実行（ファイル名順 + depends_on）
                 [--dry-run [--sample 1..50] [--json]]
                 [--resume | --from f | --only f]
@@ -138,6 +140,8 @@ ksql-flow force-unlock-job --job-key <key> --reason <text> --confirmed-by <name>
 * `--resume`: 直近バッチの FAILED / ABORTED / TIMEOUT / 失敗起因の SKIPPED / RUNNING と、JOB レコードがない未着手ジョブのみを、**元の as-of を引き継いで**再実行します。`--from` / `--only` の選抜外として記録された `SKIPPED (filtered)` は再実行しません（ログアプリが正・`.ksql/state-<profile>.json` はフォールバック）。
 * `--dry-run`: read-only 文を実行し、DML は実レコードとの差分プレビューに置き換えます（書込ゼロ）。ASSERT 違反は `ABORTED`（Exit 2）、EXIT SUCCESS IF 成立は `NO_DATA`（Exit 0）として本実行と同じゲートになります。読み取り API は実消費するため `limits.maxApiCalls` が適用されます。`--sample N`（既定 5、1〜50）と `--json`（CI / PR コメント用の単一 JSON）を併用できます。
 * `--result-json` / `--correlation-id` / `--attempt-id` / `--expected-job-id`: FlowNet 等から単一 `run` を呼ぶ orchestrator モードです。4 つは全か無かで、`--result-json -` は stdout、path は既存ファイルを上書きせず atomic に結果を書きます。ID は `[A-Za-z0-9._:-]` の 1〜128 文字、expected job ID は SQL の `@ksql name` と一致が必要です。
+* `--export-csv`: `CREATE TEMP TABLE #report ...` の結果は `--export-csv report=report.csv`、単文 SELECT は `--export-csv report.csv` で CSV にします。名前付きは反復可能、名前付き/名前なしの混在と名前なし複数指定は不可です。`=` は最初の1個だけが区切りなので、`=` を含む path は名前付き形式を使います。`--export-encoding` は `utf8`（既定）または `sjis`、日時変換は `--export-timezone` で指定します。SJIS は Unicode の完全 round-trip を確認し、表現不能文字があれば完成ファイルを残さず Exit 1 で停止します。export は `run` 専用で dry-run / run-all では使えません。
+* export file は同じ directory の一時 fileへ全量 write・fsync・close 後に rename します。rename 失敗時に旧 fileを削除する fallback は行いません。複数出力は file 単位の atomicity で、先行 rename 成功分は rollback しません。orchestrator の `output_files` は完成済み artifact の `name / sha256 / bytes / rows / encoding` だけを含み、pathやCSV内容を含みません。
 * `--lock local-only`: `logApp` 未設定時は ConfigError（Exit 1）、設定済みログアプリへ到達できない場合は Exit 3 として、既定では何も実行せず停止します。このフラグで「ローカルロックのみで続行」を明示的に許可できます（警告を表示）。
 * `unlock` / `--force-unlock`: 人間向けの既存経路で、解除対象は **同一プロファイルの全 RUNNING レコード**です。対象限定の自動回復には、読取専用 `inspect-lock` と停止確認入力が必須の `force-unlock-job` を使用します。
 * CLI はコマンド別 allowlist で未知・不適用 flag、余分な positional、競合 flag を API 呼び出し前に Exit 1 で拒否します。`--resume` / `--from` / `--only` は相互排他、`--json` / `--sample` は `--dry-run` 専用です。
@@ -201,6 +205,7 @@ ksql-flow run-all jobs --profile stg --dry-run --json > dry-run.json
 
 | ksql-flow | @rex0220/kintone-sql-tools | dialect |
 | --- | --- | --- |
+| **0.9.0** | **^3.77.0**（CSV EXPORT sink / resultCsv capability） | **1** |
 | **0.8.0** | **^3.76.0**（IMPORT source 供給と rows receipt — importCsv capability） | **1** |
 | **0.4.0〜0.7.0** | **^3.74.0**（native upsert 既定 ON — 3.4 参照） | **1** |
 | 0.1.0〜0.3.1 | ^3.71.0 | 1 |

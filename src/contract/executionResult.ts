@@ -69,6 +69,14 @@ export interface InputFileReceipt {
   encoding?: "UTF8" | "SJIS";
 }
 
+export interface OutputFileReceipt {
+  name: string;
+  sha256: string;
+  bytes: number;
+  rows: number;
+  encoding: "utf8" | "sjis";
+}
+
 export interface ExecutionResult {
   formatVersion: typeof EXECUTION_RESULT_FORMAT_VERSION;
   kind: typeof EXECUTION_RESULT_KIND;
@@ -95,6 +103,7 @@ export interface ExecutionResult {
   ksqlFlowVersion: string;
   engineVersion: string;
   input_files: InputFileReceipt[];
+  output_files: OutputFileReceipt[];
   error: ExecutionResultError | null;
 }
 
@@ -135,6 +144,7 @@ export interface NormalizeExecutionResultContext {
   cause?: unknown;
   error?: ExecutionErrorInput;
   inputFiles: readonly InputFileReceipt[];
+  outputFiles: readonly OutputFileReceipt[];
   validationFailureKind?: "INPUT_FILE_MUTATED";
   /** controlled failure でも必ず明示し、error.message と診断キーに適用する。 */
   masker: Pick<SecretMasker, "mask">;
@@ -208,6 +218,7 @@ export function normalizeJobOutcome(
     ksqlFlowVersion: requireNonEmpty(context.ksqlFlowVersion, "ksqlFlowVersion"),
     engineVersion: requireNonEmpty(context.engineVersion, "engineVersion"),
     input_files: context.inputFiles.map((item) => ({ ...item })),
+    output_files: context.outputFiles.map((item) => ({ ...item })),
     error: isFailureResultCode(disposition.resultCode)
       ? buildExecutionError(disposition.resultCode, outcome, context)
       : null,

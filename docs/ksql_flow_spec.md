@@ -1,6 +1,6 @@
 # kSQL Flow 仕様書
 
-**対応バージョン: ksql-flow v0.8.0 ／ エンジン @rex0220/kintone-sql-tools ^3.76.0 ／ SQL 方言 dialect 1**
+**対応バージョン: ksql-flow v0.9.0 ／ エンジン @rex0220/kintone-sql-tools ^3.77.0 ／ SQL 方言 dialect 1**
 
 本書は kSQL Flow の公開仕様書です。本書単体で仕様として完結します。
 （参考・非規範: 設計判断の経緯や改訂履歴は https://github.com/rex0220/ksql-flow の `docs/internal/` に公開されています）
@@ -64,7 +64,7 @@ flowchart TD
     JSONL -.->|"次回実行時に再送"| LOG
 ```
 
-> **前提条件**: 図中の「kSQL MCP を通じてクエリ検証」は、MCP が Flow 拡張構文（dialect 1）を検証できることが前提です（→ 3.7。ランナーが要求するエンジンは **^3.76.0** — README の互換表を参照）。なお MCP の `ksql_validate` はネットワーク 0 の契約のため updateKey 等のスキーマ依存検証は含まず、フル検証はランナーの `validate`（公式 API `/flow` の `validateScript(source, { client })`）で行います。
+> **前提条件**: 図中の「kSQL MCP を通じてクエリ検証」は、MCP が Flow 拡張構文（dialect 1）を検証できることが前提です（→ 3.7。ランナーが要求するエンジンは **^3.77.0** — README の互換表を参照）。なお MCP の `ksql_validate` はネットワーク 0 の契約のため updateKey 等のスキーマ依存検証は含まず、フル検証はランナーの `validate`（公式 API `/flow` の `validateScript(source, { client })`）で行います。
 
 **通信先の限定（セキュリティモデルの要点、詳細は 12 章）**: kSQL Flow が通信するのは (1) 設定された kintone 環境、(2) 利用者が設定した通知 Webhook のみ。rex0220 側サーバーへのテレメトリ送信・ライセンス照会等の外部通信は一切行わない。
 
@@ -208,7 +208,7 @@ DELETE MISSING WITHIN (WHERE 当月売上実績 > 0);
 * **Flow 構文は正規エイリアスとして追加**: `CREATE TEMP TABLE x AS SELECT ...`（裸名） ≡ `CREATE TEMP TABLE #x AS SELECT ...`、`UPSERT ... KEY (...)` ≡ `UPSERT ... ON DUPLICATE (...)` とし、`MERGE`（3.4）もこの UPSERT へ正規化します。どちらの表記も同一の内部表現に解決され、意味差はありません。
 * **Flow 専用文**（`ASSERT <条件>, 'msg'` 形式・`ASSERT WARN`・`EXIT SUCCESS IF`・`-- @ksql` ヘッダ・時刻関数の as-of 固定評価）は dialect 1 の追加仕様として既存エンジンに実装され、MCP の `ksql_validate` も同一実装を共有します。
 * **dialect 0 との互換**: `ASSERT <式> <比較> <式>` は dialect 0 の既存機能として従来どおり動作します。dialect 0 のスクリプトでエラーになるのは **Flow 形式（`, 'msg'` 付き / `WARN`）を使った場合のみ**です。
-* **提供状況**: Flow 拡張構文（dialect 1）の解析・検証・実行は kintone-sql-tools が提供します。公式 API `@rex0220/kintone-sql-tools/flow`（parseScript / validateScript / explainScript / executeStatement / previewStatement / onChunkWritten ほか、文単位実行対応）が semver 対象として提供されており、Flow CLI（本リポジトリ）はこれに依存して実装されています（要求バージョンは ^3.76.0 — README 互換表）。詳細は kintone-sql-tools 言語リファレンス §27 を参照。
+* **提供状況**: Flow 拡張構文（dialect 1）の解析・検証・実行は kintone-sql-tools が提供します。公式 API `@rex0220/kintone-sql-tools/flow`（parseScript / validateScript / explainScript / executeStatement / previewStatement / onChunkWritten ほか、文単位実行対応）が semver 対象として提供されており、Flow CLI（本リポジトリ）はこれに依存して実装されています（要求バージョンは ^3.77.0 — README 互換表）。詳細は kintone-sql-tools 言語リファレンス §27 を参照。
 
 ### 3.8 リポジトリ構成（全面 MIT）
 
@@ -259,6 +259,18 @@ ksql-flow run -f monthly.sql --profile p --as-of t \
 **Execution Result への記録**: 読み込んだ source は `input_files: [{name, sha256, bytes, rows?, encoding?}]` として結果 JSON に載ります。`rows`(RFC 4180 解析後の data record 数。header 除外・quoted 改行は 1 record・1 列 CSV の末尾空行は空値の data row として +1)と実効 `encoding` は、engine の materialize 成功時(receipt)にのみ確定します。`input_files` は materialize に成功した解釈のみを列挙します。同一 source について receipt が1件以上得られた場合、成功した解釈の entry だけを載せ、未達解釈を表す sha256/bytes-only entry は追加しません。その source で receipt が1件も得られなかった場合(decode 失敗・maxRecords 超過など)に限り、sha256/bytes のみの entry を1件載せます。同一 source を異なる `ENCODING` の複数文が読むと、成功した解釈ごとに別 entry になります。絶対パス・セル値は結果 JSON に含めません。
 
 capability は `features.importCsv: true`(v0.8.0 以降・engine v3.76.0 以降)で公開します。
+
+### 3.10 CSV EXPORT sink — Contract v1.1
+
+CSV出力は単一 `run` で利用します。名前付き一時表は `--export-csv report=report.csv`（反復可能）、単文SELECTは `--export-csv report.csv` とします。`=` は最初の1個だけを区切り、`=` を含むpathは名前付き形式で指定します。名前付きと名前なしは混在できず、名前なしはちょうど1文のSELECTだけを対象とします。「最後のSELECT」を推測して選ぶことはありません。SQL内の未指定一時表は通常どおり扱い、指定sinkに対応する `CREATE TEMP TABLE` がない、重複する、または最終状態でDROP済みなら文実行/API/file操作前にExit 1です。
+
+値変換、列metadata、RFC 4180 quotingはengine公開serializerを正とします。headerは必須、改行はCRLF、最終CRLFあり、BOMなしです。複数値はLF結合、USER系はcode、DATEは不変、DATETIMEはUTC保持または `--export-timezone` のoffsetへ変換し、ミリ秒を保持します。NUMBER/CALCの指数表現は10進展開し、SUBTABLE/FILEは非対応です（明細は `APP$明細` をSELECTします）。全件をmemory上でserializeするため、出力規模は `limits.maxTempRows` と利用可能memoryを考慮します。
+
+`--export-encoding` は `utf8`（既定）または `sjis`、DATETIME用zoneは `--export-timezone` で指定します。SJISは `encoding-japanese@2` でencode後、`TextDecoder("shift_jis", {fatal:true})` でdecodeし、UTF-16 code unit完全一致を確認します。表現不能文字や別文字化は最初のcode pointとoffsetだけを示してExit 1とし、cell全文や完成fileを残しません。
+
+全statement（EXIT後のskipを含む）の処理後に各sinkのstatusを確認します。`materialized`だけをserializeし、`not-created`はfile/receiptを作らず既存fileも変更しません。このためCREATE前の `EXIT SUCCESS` は従来どおりNO_DATA / Exit 0です。`failed` / `incomplete` はserializeしません。全materialized sinkのserialize成功後、targetと同じdirectoryの一時fileへ全量write、fsync、close、renameします。renameのEPERM等でも旧file削除後のretryは行わず、tempを削除してExit 3です。複数target間はtransactionではなくfile単位の保証で、先にrename済みのartifactはrollbackしません。hard killや電源断ではfinallyが動かずstaged tempが残る場合があります。
+
+orchestratorのExecution Resultは完成名へrename済みのartifactだけを `output_files: [{name, sha256, bytes, rows, encoding}]` に指定順で載せます。sha256はwriterへ渡した同じ `receipt.data` から計算し、path、CSV text、cell値は含めません。`features.resultCsv: true` はv0.9.0以降です。standalone CLIは相対pathをcwd基準で受理します。FlowNetの出力directory allowlist、絶対path、symlink/junction/traversal防御はFlowNet側の責務です。
 
 ---
 

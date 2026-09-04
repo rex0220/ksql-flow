@@ -3,6 +3,7 @@ import { EXECUTION_CONTRACT, EXECUTION_RESULT_SCHEMA_ID } from "../contract";
 import { RUNNER_VERSION } from "../executor";
 import { EXIT, type ExitCode } from "../types";
 import { writeJsonObject } from "./machineJson";
+import { hasExportEngineCapability } from "../exportSinks";
 
 export function capabilitiesCommand(): ExitCode {
   writeJsonObject({
@@ -25,6 +26,7 @@ export function capabilitiesCommand(): ExitCode {
       // Contract v1.1: CLI parse・source loader・engine /flow実行・期待sha256
       // 検証・rows receipt(B178)の全経路が揃ったbuildでのみtrue。
       importCsv: true,
+      resultCsv: hasExportEngineCapability(),
       jobLockProtocol: "profile-job-v0",
     },
   });

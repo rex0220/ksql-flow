@@ -29,6 +29,7 @@ import {
   InputFileMutatedError,
   type ImportSourceInput,
 } from "../importSources";
+import { ExportSinkRegistry, type ExportOutputOptions } from "../exportSinks";
 
 export interface RunOptions {
   asOf?: string;
@@ -49,6 +50,7 @@ export interface RunOptions {
   expectedJobId?: string;
   importSources?: readonly ImportSourceInput[];
   expectedImportSha256?: ReadonlyMap<string, string>;
+  exportOutputs?: ExportOutputOptions;
 }
 
 export interface OrchestratorRunOptions extends RunOptions {
@@ -115,6 +117,7 @@ async function runStandaloneCommand(
   }
 
   let importRegistry: ImportSourceRegistry | undefined;
+  let exportRegistry: ExportSinkRegistry | undefined;
   const requiredImportSources = collectRequiredImportSources(job.parsed.statements);
   if (options.importSources !== undefined || requiredImportSources.length > 0) {
     try {
@@ -128,6 +131,15 @@ async function runStandaloneCommand(
           env.jsonl.append("unused_import_source", { message });
         }
       );
+    } catch (error) {
+      out(`エラー: ${errorMessage(error)}`);
+      return EXIT.VALIDATION;
+    }
+  }
+  if (options.exportOutputs !== undefined) {
+    try {
+      exportRegistry = new ExportSinkRegistry(options.exportOutputs, job.parsed.statements);
+      await exportRegistry.preflight(env.client, job.parsed.statements, job.parsed.meta, importRegistry?.resolver);
     } catch (error) {
       out(`エラー: ${errorMessage(error)}`);
       return EXIT.VALIDATION;
@@ -194,6 +206,7 @@ async function runStandaloneCommand(
       jobKey,
       cancellation,
       importSources: importRegistry,
+      exportSinks: exportRegistry,
       strict: options.strict,
     });
   } catch (error) {
@@ -315,6 +328,7 @@ async function runOrchestratedCommand(
   let ranJob = false;
   let completedJob = false;
   let importRegistry: ImportSourceRegistry | undefined;
+  let exportRegistry: ExportSinkRegistry | undefined;
   let inputFileMutated = false;
 
   try {
@@ -353,6 +367,10 @@ async function runOrchestratedCommand(
         (message) => out(message)
       );
     }
+    if (options.exportOutputs !== undefined) {
+      exportRegistry = new ExportSinkRegistry(options.exportOutputs, job.parsed.statements);
+      await exportRegistry.preflight(env.client, job.parsed.statements, job.parsed.meta, importRegistry?.resolver);
+    }
 
     await env.logApp!.requireFields(ORCHESTRATOR_LOG_APP_FIELD_CODES);
 
@@ -388,6 +406,7 @@ async function runOrchestratedCommand(
       },
       cancellation,
       importSources: importRegistry,
+      exportSinks: exportRegistry,
       preloadImportSources: importRegistry !== undefined,
       strict: options.strict,
     });
@@ -481,6 +500,7 @@ async function runOrchestratedCommand(
       ...(finalOutcome.errorMessage !== undefined ? { message: finalOutcome.errorMessage } : {}),
     },
     inputFiles: importRegistry?.snapshotInputFiles() ?? [],
+    outputFiles: exportRegistry?.snapshotOutputFiles() ?? [],
     ...(inputFileMutated ? { validationFailureKind: "INPUT_FILE_MUTATED" as const } : {}),
     masker: env?.masker ?? fallbackMasker,
   });
@@ -550,6 +570,7 @@ export function writeOrchestratorStartupFailure(
     cause: error,
     error: { message: errorMessage(error) },
     inputFiles: [],
+    outputFiles: [],
     masker,
   });
   console.error(masker.mask(`エラー: ${errorMessage(error)}`));

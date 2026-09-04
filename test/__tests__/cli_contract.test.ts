@@ -18,6 +18,30 @@ describe("CLI public contract", () => {
     expect(() => validateArgs(args)).not.toThrow();
   });
 
+  test("EXPORT flags are repeatable and keep equals signs after the first separator", () => {
+    const args = parseArgs([
+      "run", "-f", "job.sql",
+      "--export-csv", "first=C:\\out\\a=b.csv",
+      "--export-csv=second=C:\\out\\second.csv",
+      "--export-encoding", "sjis", "--export-timezone", "Asia/Tokyo",
+    ]);
+    expect(args.repeatedFlags.get("--export-csv")).toEqual([
+      "first=C:\\out\\a=b.csv", "second=C:\\out\\second.csv",
+    ]);
+    expect(() => validateArgs(args)).not.toThrow();
+  });
+
+  test.each([
+    [["run", "-f", "job.sql", "--export-csv", "a.csv", "--export-csv", "b.csv"], /1件/],
+    [["run", "-f", "job.sql", "--export-csv", "a=x.csv", "--export-csv", "a=y.csv"], /重複/],
+    [["run", "-f", "job.sql", "--export-csv", "a.csv", "--export-encoding", "SJIS"], /utf8.*sjis/],
+    [["run", "-f", "job.sql", "--export-csv", "a.csv", "--export-timezone", "Invalid/Zone"], /IANA/],
+    [["run", "-f", "job.sql", "--export-csv", "a.csv", "--dry-run"], /dry-run/],
+    [["run-all", "jobs", "--export-csv", "a.csv"], /使用できません/],
+  ])("rejects invalid or inapplicable EXPORT CLI input", (argv, expected) => {
+    expect(() => validateArgs(parseArgs(argv as string[]))).toThrow(expected as RegExp);
+  });
+
   test.each([
     [["run", "-f", "job.sql", "--import-csv", "bad"], /name.*value|形式/],
     [["run", "-f", "job.sql", "--import-csv", "x=relative.csv"], /絶対 path/],

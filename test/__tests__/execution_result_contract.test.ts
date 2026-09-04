@@ -66,6 +66,7 @@ function context(
     ksqlFlowVersion: "0.6.0",
     engineVersion: "3.74.0",
     inputFiles: [],
+    outputFiles: [],
     failureKind,
     error,
     masker: { mask: (value) => value },
@@ -122,6 +123,22 @@ describe("JobOutcome to Execution Result normalization", () => {
     expect(result.input_files[0]).not.toHaveProperty("rows");
     expectSchemaValid(result);
     expect(validate({ ...result, input_files: [{ ...result.input_files[0], path: "C:\\secret.csv" }] })).toBe(false);
+  });
+
+  test("emits strict path-free output_files while old v1 fixtures remain valid", () => {
+    const input = context(true);
+    input.outputFiles = [{
+      name: "export",
+      sha256: "b".repeat(64),
+      bytes: 9,
+      rows: 1,
+      encoding: "utf8",
+    }];
+    const result = normalizeJobOutcome(outcome("SUCCESS", EXIT.OK), input);
+    expect(result.output_files).toEqual(input.outputFiles);
+    expectSchemaValid(result);
+    expect(validate({ ...result, output_files: [{ ...result.output_files[0], path: "C:\\secret.csv" }] })).toBe(false);
+    expectSchemaValid(readFixture("success.json"));
   });
 
   test("maps pre-execution sha mismatch to INPUT_FILE_MUTATED", () => {

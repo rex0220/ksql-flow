@@ -64,6 +64,21 @@
       "type": "array",
       "items": { "$ref": "#/$defs/inputFile" }
     },
+    "output_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "sha256", "bytes", "rows", "encoding"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "bytes": { "type": "integer", "minimum": 0 },
+          "rows": { "type": "integer", "minimum": 0 },
+          "encoding": { "enum": ["utf8", "sjis"] }
+        }
+      }
+    },
     "error": {
       "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/error" }]
     }

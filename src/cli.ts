@@ -14,6 +14,7 @@ import { describeProfileCommand } from "./commands/describeProfile";
 import { inspectJobCommand } from "./commands/inspectJob";
 import { forceUnlockJobCommand, inspectLockCommand } from "./commands/lockRecovery";
 import { parseImportInputs } from "./importSources";
+import { parseExportOutputs } from "./exportSinks";
 
 export interface ParsedArgs {
   command: string;
@@ -47,9 +48,12 @@ const VALUE_FLAGS = new Set([
   "--import-csv",
   "--import-json",
   "--expected-import-sha256",
+  "--export-csv",
+  "--export-encoding",
+  "--export-timezone",
 ]);
 const REPEATABLE_VALUE_FLAGS = new Set([
-  "--import-csv", "--import-json", "--expected-import-sha256",
+  "--import-csv", "--import-json", "--expected-import-sha256", "--export-csv",
 ]);
 
 const COMMON_FLAGS = ["--profile", "--config", "--help", "-h"] as const;
@@ -62,6 +66,7 @@ const COMMAND_FLAGS: Record<string, ReadonlySet<string>> = {
     "--strict", "--max-api-calls", "--lock", "--force-unlock",
     "--result-json", "--correlation-id", "--attempt-id", "--expected-job-id",
     "--import-csv", "--import-json", "--expected-import-sha256",
+    "--export-csv", "--export-encoding", "--export-timezone",
   ]),
   "run-all": new Set([
     ...COMMON_FLAGS,
@@ -175,7 +180,26 @@ export function validateArgs(args: ParsedArgs): void {
   }
   validateOrchestratorArgs(args);
   validateImportArgs(args);
+  validateExportArgs(args);
   validateLockRecoveryArgs(args);
+}
+
+function validateExportArgs(args: ParsedArgs): void {
+  if (args.command !== "run") return;
+  const values = repeatedStringFlags(args, "--export-csv");
+  const hasExportOption = values.length > 0
+    || args.flags.has("--export-encoding")
+    || args.flags.has("--export-timezone");
+  if (!hasExportOption) return;
+  if (boolFlag(args, "--dry-run")) {
+    throw new Error("--export-csv は --dry-run と併用できません");
+  }
+  parseExportOutputs(
+    values,
+    stringFlag(args, "--export-encoding"),
+    stringFlag(args, "--export-timezone"),
+    stringFlag(args, "--result-json")
+  );
 }
 
 function validateImportArgs(args: ParsedArgs): void {
@@ -290,6 +314,8 @@ const USAGE = `kSQL Flow — kintone バッチランナー (MIT, as-is)
                 [--import-csv <name>=<absolute-path>]...
                 [--import-json <name>=<absolute-path>]...
                 [--expected-import-sha256 <name>=<64hex>]...
+                [--export-csv [<name>=]<path>]...
+                [--export-encoding utf8|sjis] [--export-timezone <IANA-zone>]
   ksql-flow run-all <jobsDir> [--profile p] [--as-of ISO8601] [--dry-run]
                 [--sample 1..50] [--json]
                 [--resume | --resume-batch batch_id] [--from file.sql] [--only file.sql]
@@ -501,6 +527,12 @@ function runOptionsFromArgs(args: ParsedArgs) {
     repeatedStringFlags(args, "--expected-import-sha256")
   );
   const hasImportOptions = imports.sources.length > 0 || imports.expectedSha256.size > 0;
+  const exports = parseExportOutputs(
+    repeatedStringFlags(args, "--export-csv"),
+    stringFlag(args, "--export-encoding"),
+    stringFlag(args, "--export-timezone"),
+    stringFlag(args, "--result-json")
+  );
   if (lock !== undefined && lock !== "local-only") {
     throw Object.assign(new Error(`--lock の値が不正です: ${lock}（指定できるのは local-only のみ）`), {
       exitCode: EXIT.VALIDATION,
@@ -519,6 +551,7 @@ function runOptionsFromArgs(args: ParsedArgs) {
       importSources: imports.sources,
       expectedImportSha256: imports.expectedSha256,
     } : {}),
+    ...(exports !== undefined ? { exportOutputs: exports } : {}),
     ...(orchestrator ?? {}),
   };
 }

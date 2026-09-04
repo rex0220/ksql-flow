@@ -24,6 +24,7 @@ import { JsonlLogger } from "./logging/jsonl";
 import { maskFieldValue, SecretMasker, stripSqlLiterals } from "./logging/mask";
 import { EXIT, JobOutcome, JobStatus } from "./types";
 import type { ImportSourceRegistry } from "./importSources";
+import type { ExportSinkRegistry } from "./exportSinks";
 
 /** チェックポイント更新の間隔（書込チャンク数）。設計書 5.1-2 の「定期的に」の実装値 */
 const CHECKPOINT_EVERY_CHUNKS = 25;
@@ -64,6 +65,7 @@ export interface RunJobParams {
   importSources?: ImportSourceRegistry;
   preloadImportSources?: boolean;
   strict?: boolean;
+  exportSinks?: ExportSinkRegistry;
 }
 
 // package.json の version を正とする（ハードコードだと npm version 更新に追随できず、
@@ -158,6 +160,8 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
     }
     if (params.preloadImportSources === true) await params.importSources.preloadUsed();
   }
+
+  const exportDeclarations = params.exportSinks?.flowDeclarations();
 
   const baseFields: LogRecordFields = {
     record_type: "JOB",
@@ -264,6 +268,8 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
   let writtenCount = 0;
   let deletedCount = 0;
   let context: ExecutionContext | null = null;
+  const statementResults: StatementResult[] = [];
+  let executionBegan = false;
   try {
     context = createExecutionContext({
       client: env.client,
@@ -275,6 +281,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
       ...(env.profile.limits.maxReadRows !== null ? { maxRecords: env.profile.limits.maxReadRows } : {}),
       ...(env.profile.limits.maxTempRows !== null ? { tempTableMaxRows: env.profile.limits.maxTempRows } : {}),
       onChunkWritten,
+      ...(exportDeclarations !== undefined ? { exportSinks: exportDeclarations } : {}),
       ...(params.importSources !== undefined ? {
         enableImport: true,
         importSource: params.importSources.resolver,
@@ -298,6 +305,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
       }
       if (!executionStartNotified) {
         executionStartNotified = true;
+        executionBegan = true;
         // kintone DATETIME はミリ秒を保持しない。結果 JSON と耐久値を同一時点にするため、
         // フックへ渡す Date 自体を kintone の保存精度へ正規化する。
         const executionStartedAt = new Date(toKintoneDateTime(new Date()));
@@ -324,6 +332,7 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
         }
       }
       const result = await executeStatement(statement, context);
+      statementResults.push(result);
       const statementMetrics = metricsDelta(result.metrics, previousMetrics);
       const statementWrittenCount = writtenRows(result);
       const statementDeletedCount = deletedRows(result);
@@ -396,6 +405,9 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
       status = "NO_DATA";
       exitCode = EXIT.OK;
     }
+    if ((status === "SUCCESS" || status === "NO_DATA") && params.exportSinks !== undefined) {
+      params.exportSinks.serialize(context, statementResults);
+    }
   } catch (error) {
     // createExecutionContext / executeStatement の同期系エラー
     if (error instanceof CancelledError || cancellationRequested(params.cancellation)) {
@@ -416,8 +428,10 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
     } else {
       reportExecutionError(params, error, errorCode(error));
       status = "FAILED";
-      exitCode = classifyRuntimeError(error);
-      errorText = errorMessage(error);
+      exitCode = params.exportSinks !== undefined && (!executionBegan || isExportError(error))
+        ? EXIT.VALIDATION
+        : classifyRuntimeError(error);
+      errorText = isExportError(error) ? safeExportErrorMessage(error) : errorMessage(error);
     }
   } finally {
     if (context !== null) {
@@ -426,6 +440,18 @@ export async function runJob(env: RunnerEnv, params: RunJobParams): Promise<JobO
       } catch {
         /* dispose の失敗は結果に影響させない */
       }
+    }
+  }
+
+  if ((status === "SUCCESS" || status === "NO_DATA") && params.exportSinks !== undefined) {
+    try {
+      await params.exportSinks.commit();
+    } catch (error) {
+      reportExecutionError(params, error, errorCode(error));
+      status = "FAILED";
+      exitCode = EXIT.RUNTIME;
+      const code = errorCode(error);
+      errorText = `CSV output file commit failed${code !== undefined ? ` (${code})` : ""}`;
     }
   }
 
@@ -492,6 +518,23 @@ function reportExecutionError(params: RunJobParams, cause: unknown, code?: strin
   } catch {
     /* 観測フックの失敗で executor の既存結果を変えない */
   }
+}
+
+function isExportError(error: unknown): boolean {
+  const code = errorCode(error);
+  return code?.startsWith("ExportSink") === true
+    || (error instanceof Error && error.message.startsWith("export sink "));
+}
+
+function safeExportErrorMessage(error: unknown): string {
+  let current: unknown = error;
+  for (let depth = 0; depth < 10 && current != null; depth++) {
+    const message = errorMessage(current);
+    const match = message.match(/U\+[0-9A-F]{4,6}\s+at offset\s+\d+/i);
+    if (match !== null) return `ExportSinkEncodingError: character ${match[0].toUpperCase().replace("AT OFFSET", "at offset")} cannot be represented in Shift_JIS`;
+    current = typeof current === "object" ? (current as { cause?: unknown }).cause : undefined;
+  }
+  return errorMessage(error);
 }
 
 function errorCode(error: unknown): string | undefined {

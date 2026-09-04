@@ -133,6 +133,36 @@ try {
     verificationDir,
     /smoke\.sql: OK/
   );
+  verify("(e) resultCsv capability", ["capabilities", "--json"], 0, verificationDir, /"resultCsv":true/);
+
+  const exportSql = join(verificationDir, "export.sql");
+  const exportCsv = join(verificationDir, "export-sjis.csv");
+  writeFileSync(exportSql, "SELECT '日本語①Ⅰ髙﨑～' AS value;\n", "utf8");
+  verify(
+    "(f) offline Shift_JIS export",
+    ["run", "-f", exportSql, "--config", smokeConfig, "--lock", "local-only",
+      "--export-csv", exportCsv, "--export-encoding", "sjis"],
+    0,
+    verificationDir,
+    /SUCCESS/
+  );
+  const exportedText = new TextDecoder("shift_jis", { fatal: true }).decode(readFileSync(exportCsv));
+  if (exportedText !== "value\r\n日本語①Ⅰ髙﨑～\r\n") {
+    throw new Error("(f) offline Shift_JIS export: byte round-trip mismatch");
+  }
+
+  const invalidSql = join(verificationDir, "export-invalid-sjis.sql");
+  const invalidCsv = join(verificationDir, "export-invalid-sjis.csv");
+  writeFileSync(invalidSql, "SELECT '😀' AS value;\n", "utf8");
+  verify(
+    "(g) unrepresentable Shift_JIS fails closed",
+    ["run", "-f", invalidSql, "--config", smokeConfig, "--lock", "local-only",
+      "--export-csv", invalidCsv, "--export-encoding", "sjis"],
+    1,
+    verificationDir,
+    /U\+1F600/
+  );
+  if (existsSync(invalidCsv)) throw new Error("(g) unrepresentable Shift_JIS created a completed file");
 } finally {
   rmSync(verificationDir, { recursive: true, force: true });
 }
