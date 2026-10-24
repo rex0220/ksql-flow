@@ -178,17 +178,20 @@ ksql-flow run-all jobs --profile stg --dry-run --json > dry-run.json
 * `notifications.onFailure.webhook`: FAILED / ABORTED / TIMEOUT 時に汎用 JSON を POST（`NO_DATA` では通知しません）。`notifications.heartbeat.on` は `success`（既定。`SUCCESS` / `NO_DATA` の Exit 0 完了時）または `always`（失敗を含む毎実行の完了時）を指定します。
 * config の公開契約の正は [JSON Schema](schema/ksql.config.schema.json) です。未知キーは全階層で ConfigError（Exit 1）になります。
 
-## Public contracts in v0.1
+## Public contracts（v0.9.0 時点）
 
-| 契約面 | v0.1 の公開契約 | 内部扱い・互換保証外 |
+| 契約面 | 公開契約 | 内部扱い・互換保証外 |
 | --- | --- | --- |
 | config | `schema/ksql.config.schema.json` のキー・型・未知キー拒否、extends / env / null semantics、`notifications.heartbeat.on` の値域 `success \| always`（既定 `success`） | 解決後の `ResolvedProfile` オブジェクト、validator 実装 |
 | CLI / Exit | command、command 別 flag allowlist、排他・dry-run 専用制約、Exit 0〜5 | parser 実装、人間向け文言・装飾 |
-| ログアプリ | [公開仕様書 §8.2](docs/ksql_flow_spec.md) の必須 22 field code/type + 任意の `deleted_count`、`record_type` 2 値、`status` 7 値、`job_key` unique、JOB/BATCH 関係。`log_detail` の **`SKIPPED (` 前方一致**と理由 `filtered` / `LOCKED` の意味 | label・layout・view、prefix 後方の人間向け文言。上記以外の理由文字列（`dependency: x` / `stop-on-error` / `batch-timeout` 等）は情報提供であり追加され得る |
-| `--json` | dry-run の `DRY_RUN` / `DRY_RUN_BATCH` exact shape と top-level `formatVersion: 1`。field 追加は additive、破壊変更は version 繰上げ | 通常 run の JSON（v0.1 では `--json` 自体を拒否） |
+| ログアプリ | [公開仕様書 §8.2](docs/ksql_flow_spec.md) の必須 22 field code/type + 任意の `deleted_count`、`record_type` 2 値、`status` 7 値、`job_key` unique、JOB/BATCH 関係。template v0.4 の相関 5 field（`correlation_id` / `attempt_id` / `execution_id` / `job_id` / `runner_execution_started_at`）と status `CANCELLED` は standalone では任意・orchestrator 実行では必須。`log_detail` の **`SKIPPED (` 前方一致**と理由 `filtered` / `LOCKED` の意味 | label・layout・view、prefix 後方の人間向け文言。上記以外の理由文字列（`dependency: x` / `stop-on-error` / `batch-timeout` 等）は情報提供であり追加され得る |
+| `--json` | dry-run の `DRY_RUN` / `DRY_RUN_BATCH` exact shape と top-level `formatVersion: 1`。field 追加は additive、破壊変更は version 繰上げ | 通常 run の JSON（`--json` は dry-run 専用。単一 `run` の機械可読結果は下記 Execution Result） |
 | JSONL | 全行の `{ v: 1, ts, event, batchId, profile }` envelope、安定 event `write_chunk` / `statement` / `job_start` / `job_finish` / `batch_start` / `batch_finish` / `dry_run_*` | その他の内部 event と payload（best-effort）、安定 event payload への additive field |
 | state | `.ksql/state-<profile>.json`、`schemaVersion: 1`、破損・未知 version の警告 fallback | jobs の内部 cache shape、手動編集 |
-| template | `template/ksql-flow-log-template1.zip`、必須 22 field / unique / 選択肢のログアプリ契約（v0.3.0 の任意 `deleted_count` は手動追加） | layout・view・label の UX |
+| Execution Result（v0.7.0〜） | orchestrator 4 フラグ（`--result-json` / `--correlation-id` / `--attempt-id` / `--expected-job-id`、全か無か）、[`schema/execution-result-v1.schema.json`](schema/execution-result-v1.schema.json)（`contract: ksql-flow.execution/v1`）、stdout 純 JSON / path への atomic 書込・既存ファイル上書き拒否、SQL 開始前の耐久 `EXECUTION_STARTED`、1 回目 signal の `CANCELLED`（Exit 3）。v1.1 で additive な `input_files` / `output_files` | ローカル JSONL の `cancelled_with_error` 等の診断 payload、2 回目 signal 後の結果保証 |
+| IMPORT / EXPORT（v0.8.0 / v0.9.0〜） | 名前付き `--import-csv` / `--import-json` + `--expected-import-sha256`（不一致は `INPUT_FILE_MUTATED`・mutation 0）、`--export-csv` / `--export-encoding utf8\|sjis` / `--export-timezone`、not-created は既存ファイル不変、SJIS 表現不能文字は fail-closed。結果 JSON は name / sha256 / bytes のみで path・セル値を含まない | 一時ファイル名・rename 手順の実装、engine materialize receipt の内部形 |
+| capabilities | `capabilities --json` の `features.importCsv` / `features.resultCsv` 等の boolean と対応 contract 一覧、`describe-profile --json` / `inspect-job --json` の通信なし出力、`inspect-lock --json` / `force-unlock-job --json` の必須入力（理由・確認者・証拠 URI）と機械可読結果 | 人間向け `unlock` / `--force-unlock` の文言、features の追加（additive） |
+| template | `template/ksql-flow-log-template1.zip`（template v0.4）、必須 22 field / unique / 選択肢 + 任意の `deleted_count`・相関 5 field・`CANCELLED` のログアプリ契約。旧アプリは `scripts/logapp_v04_upgrade.console.js` / `logapp_v04_field_acl.console.js` で v0.4 相当へ更新 | layout・view・label の UX、`rerun_` フィールド（ポーラー用・ランナー非依存） |
 
 `DRY_RUN` の top-level field は `formatVersion, kind, job, profile, asOf, status, exitCode, sampleLimit, reads, writes, actualApiCalls, samples, gate?, incomplete, error?`、`DRY_RUN_BATCH` は `formatVersion, kind, warning, exitCode, jobs` です。完全な nested shape と変更規則は [公開仕様書 §10.2](docs/ksql_flow_spec.md) を参照してください。
 
@@ -216,8 +219,8 @@ ksql-flow run-all jobs --profile stg --dry-run --json > dry-run.json
 
 * チェックポイントの `last_written_key` は、最後に成功した書込チャンクの最終キー値です。書込順の保証はなく、復旧ウォーターマークではなく障害調査用の診断情報として扱います。キー値を取得できない操作ではチャンク情報のみを記録します。
 * クライアント証明書（`clientCert`）・`proxy` は未対応です。設定されている場合は、安全のため無視せず ConfigError（Exit 1）で停止します。現バージョンを使う場合はこれらの設定を削除してください。
-* validate の推定 API 消費・推定所要時間表示は v0.1 では未対応です。推定と実測読み取り API 消費は `--dry-run` の EXPLAIN / preview で確認してください。
-* 並列実行（`--parallel`）は未対応（初期リリースは順次実行）。
+* validate の推定 API 消費・推定所要時間表示は現バージョンでは未対応です。推定と実測読み取り API 消費は `--dry-run` の EXPLAIN / preview で確認してください。
+* 並列実行（`--parallel`）は未対応（順次実行のみ。ジョブネット / 並列化は別プロジェクト kSQL-FlowNet の範囲）。
 
 ## Windows タスクスケジューラ / PowerShell 5.1
 
